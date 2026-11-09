@@ -1,6 +1,7 @@
 package main
 
 import (
+	"mime"
 	"net/http"
 	"os"
 	"strings"
@@ -143,6 +144,56 @@ func TestDeleteFiles(t *testing.T) {
 	}
 	e.expect(e.get("/s/"+s.Token+"/files/"+a.ID), http.StatusNotFound)
 	e.expect(e.send(e.owner, http.MethodGet, "/api/files/"+a.ID+"/content", nil), http.StatusNotFound)
+}
+
+func TestRename(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a := e.upload(rootID, "report.txt", []byte("aaa"))
+	e.upload(rootID, "notes.txt", []byte("bbb"))
+	s := e.createShare(nil, a)
+	rename := func(id, name string, status int) reply {
+		t.Helper()
+		return e.expect(e.api(http.MethodPatch, "/api/items/"+id, map[string]string{"name": name}), status)
+	}
+
+	var renamed Item
+	rename(a.ID, "  Report 2026.txt ", http.StatusOK).decode(t, &renamed)
+	if renamed.ID != a.ID || renamed.Name != "Report 2026.txt" {
+		t.Errorf("renamed file = %+v", renamed)
+	}
+	wantBody(t, e.get("/s/"+s.Token), "Report 2026.txt")
+	_, params, _ := mime.ParseMediaType(e.get(e.fileURL(s, a) + "?download").header.Get("Content-Disposition"))
+	if params["filename"] != "Report 2026.txt" {
+		t.Errorf("a download of the renamed file is called %q", params["filename"])
+	}
+	// Only the case changes: that's the same file, not a clash.
+	rename(a.ID, "REPORT 2026.txt", http.StatusOK)
+
+	// A name that's taken is refused rather than changed, so the owner gets the name they typed.
+	wantBody(t, rename(a.ID, "Notes.TXT", http.StatusConflict), "There's already something called Notes.TXT in this folder.")
+	wantBody(t, rename(a.ID, "../notes.txt", http.StatusBadRequest), "Names can't contain / or")
+	wantBody(t, rename(a.ID, `old\notes.txt`, http.StatusBadRequest), "Names can't contain / or")
+	wantBody(t, rename(a.ID, "   ", http.StatusBadRequest), "Type a name.")
+	wantBody(t, rename(rootID, "Mine", http.StatusForbidden), "Stash needs this folder, so it can't be renamed.")
+	wantBody(t, rename(requestsID, "Mine", http.StatusForbidden), "Stash needs this folder, so it can't be renamed.")
+	rename("nope", "x", http.StatusNotFound)
+
+	// An upload link's folder and the link carry the same name.
+	l := e.createLink(map[string]any{"name": "Tax papers"})
+	rename(l.Folder, "Tax papers 2026", http.StatusOK)
+	if got := e.state().Links[0].Name; got != "Tax papers 2026" {
+		t.Errorf("the link is called %q after renaming its folder", got)
+	}
+	wantBody(t, rename(l.Folder, strings.Repeat("x", 121), http.StatusBadRequest), "at most 120 characters")
+
+	st, err := openStore(e.srv.cfg.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.items[a.ID].Name; got != "REPORT 2026.txt" {
+		t.Errorf("after a restart the file is called %q", got)
+	}
 }
 
 func TestOwnerFileContent(t *testing.T) {

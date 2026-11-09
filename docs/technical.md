@@ -272,6 +272,7 @@ status 200. That's 200 rather than 201, because wget2 doesn't print the reply of
 | `GET /api/state` | Everything: items, links, shares, storage, public origin |
 | `POST /api/folders` | `{parent, name}` |
 | `POST /api/items/delete` | `{ids}`: delete files |
+| `PATCH /api/items/<id>` | `{name}`: rename a file or folder. A name already taken in that folder is refused. Renaming an upload link's folder renames the link too. |
 | `GET /api/files/<id>/content` | File contents. Add `?download` to force a download. |
 | `POST /api/uploads`, `GET`/`PUT`/`DELETE /api/uploads/<id>` | Chunked upload |
 | `POST /api/links`, `PATCH /api/links/<id>` | Create or change an upload link |
@@ -314,7 +315,7 @@ Resuming doesn't count either, from the browser that started the download (see
 - Uploads can't continue after Stash restarts.
 - Resuming a share download from the command line (`curl -C -` without a cookie jar) counts as a
   new download, and so does resuming after Stash restarts.
-- Folders can't be renamed, moved or deleted yet. Deleting files works.
+- Files and folders can't be moved to another folder yet, and folders can't be deleted yet.
 - The tests cover the server, not the page scripts. See [Checking changes](#checking-changes).
 
 ## Development

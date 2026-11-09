@@ -202,6 +202,16 @@ func (st *store) uniqueName(parent, name string) string {
 	}
 }
 
+// nameTaken says whether another item in the folder already has this name, ignoring case.
+func (st *store) nameTaken(parent, name, except string) bool {
+	for _, it := range st.children(parent) {
+		if it.ID != except && strings.EqualFold(it.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
 func (st *store) addFolder(parent, name string) *Item {
 	it := &Item{ID: newID(), Type: "folder", Parent: parent, Name: st.uniqueName(parent, name), Modified: nowMillis()}
 	st.items[it.ID] = it

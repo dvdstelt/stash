@@ -106,6 +106,7 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/state", srv.owner(srv.handleState))
 	mux.HandleFunc("POST /api/folders", srv.owner(srv.handleCreateFolder))
 	mux.HandleFunc("POST /api/items/delete", srv.owner(srv.handleDeleteItems))
+	mux.HandleFunc("PATCH /api/items/{id}", srv.owner(srv.handleRenameItem))
 	mux.HandleFunc("GET /api/files/{id}/content", srv.owner(srv.handleFileContent))
 	mux.HandleFunc("POST /api/uploads", srv.owner(srv.handleOwnerUploadStart))
 	mux.HandleFunc("GET /api/uploads/{id}", srv.owner(srv.ownerUpload(srv.handleUploadStatus)))

@@ -85,8 +85,8 @@ The person who opens the link sees your message, how much space is left, and an 
 onto. They can't see files that are already there. If the link is full, has expired or was revoked,
 they get a clear message instead.
 
-Files arrive in **My files › Requests**, in a folder named after the link. You can change a link's
-limits, revoke it or reopen it at any time.
+Files arrive in **My files › Requests**, in a folder named after the link. Renaming that folder
+renames the link too. You can change a link's limits, revoke it or reopen it at any time.
 
 ### Sending someone files: share links
 

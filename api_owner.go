@@ -133,6 +133,52 @@ func (srv *server) handleDeleteItems(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int{"deleted": deleted})
 }
 
+// handleRenameItem renames a file or folder. A name that's already taken in the same folder is
+// refused rather than changed to "name (2)", so the owner ends up with the name they typed.
+func (srv *server) handleRenameItem(w http.ResponseWriter, r *http.Request) {
+	var in struct{ Name string }
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if strings.ContainsAny(in.Name, `/\`) {
+		jsonError(w, http.StatusBadRequest, `Names can't contain / or \.`)
+		return
+	}
+	name, err := cleanName(in.Name)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "Type a name.")
+		return
+	}
+	srv.st.mu.Lock()
+	defer srv.st.mu.Unlock()
+	it := srv.st.items[r.PathValue("id")]
+	switch {
+	case it == nil:
+		jsonError(w, http.StatusNotFound, "That file or folder doesn't exist anymore.")
+		return
+	case it.ID == rootID || it.ID == requestsID:
+		jsonError(w, http.StatusForbidden, "Stash needs this folder, so it can't be renamed.")
+		return
+	case srv.st.nameTaken(it.Parent, name, it.ID):
+		jsonError(w, http.StatusConflict, fmt.Sprintf("There's already something called %s in this folder.", name))
+		return
+	}
+	// An upload link's folder carries the link's name, and the other way round.
+	link := srv.st.linkByFolder(it.ID)
+	if link != nil && utf8.RuneCountInString(name) > 120 {
+		jsonError(w, http.StatusBadRequest, "This folder belongs to an upload link, so its name can be at most 120 characters.")
+		return
+	}
+	it.Name = name
+	if link != nil {
+		link.Name = name
+	}
+	if !srv.saveOrFail(w) {
+		return
+	}
+	writeJSON(w, http.StatusOK, it)
+}
+
 func (srv *server) handleFileContent(w http.ResponseWriter, r *http.Request) {
 	srv.st.mu.Lock()
 	it := srv.st.items[r.PathValue("id")]

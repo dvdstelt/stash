@@ -80,6 +80,11 @@ const store = {
     return items.get(it.id);
   },
 
+  async rename(id, name) {
+    await request('PATCH', `/api/items/${encodeURIComponent(id)}`, { name });
+    await this.load();
+  },
+
   async remove(ids) {
     await request('POST', '/api/items/delete', { ids });
     await this.load();

@@ -231,6 +231,7 @@ func TestOwnerEndpointsNeedTheOwner(t *testing.T) {
 		"GET /api/state",
 		"POST /api/folders",
 		"POST /api/items/delete",
+		"PATCH /api/items/x",
 		"GET /api/files/x/content",
 		"POST /api/uploads",
 		"GET /api/uploads/x",

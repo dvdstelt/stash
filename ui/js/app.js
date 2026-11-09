@@ -262,6 +262,7 @@ function openPreview(id) {
       <div class="pv-actions">
         <a class="btn btn-primary" href="${store.contentUrl(it.id)}?download" download>${icon('download')} Download</a>
         <button type="button" class="btn" data-action="share-files" data-ids="${it.id}">${icon('link')} Create share link</button>
+        <button type="button" class="btn" data-action="rename" data-id="${it.id}" data-reopen="true">${icon('pencil')} Rename</button>
         <button type="button" class="btn btn-ghost btn-danger" data-action="delete" data-ids="${it.id}">${icon('trash')} Delete</button>
       </div>
     </aside>
@@ -306,12 +307,15 @@ let menu = null; // { id, trigger } while the menu is open
 
 function itemMenu(it) {
   const file = it.type === 'file';
+  const fixed = it.id === 'requests'; // "My files" itself never shows up as an item
   return html`
     <button type="button" role="menuitem" data-action="open" data-id="${it.id}">${icon(file ? 'eye' : 'folder')}${file ? 'Preview' : 'Open'}</button>
-    ${file ? html`<a role="menuitem" href="${store.contentUrl(it.id)}?download" download>${icon('download')}Download</a>
-      <button type="button" role="menuitem" data-action="share-files" data-ids="${it.id}">${icon('link')}Create share link…</button>
+    ${file ? html`<a role="menuitem" href="${store.contentUrl(it.id)}?download" download>${icon('download')}Download</a>` : ''}
+    <button type="button" role="menuitem" data-action="rename" data-id="${it.id}" ${fixed ? raw('disabled') : ''}>${icon('pencil')}Rename…</button>
+    ${file ? html`<button type="button" role="menuitem" data-action="share-files" data-ids="${it.id}">${icon('link')}Create share link…</button>
       <div role="separator"></div>
-      <button type="button" role="menuitem" class="danger" data-action="delete" data-ids="${it.id}">${icon('trash')}Delete</button>` : ''}`;
+      <button type="button" role="menuitem" class="danger" data-action="delete" data-ids="${it.id}">${icon('trash')}Delete</button>` : ''}
+    ${fixed ? html`<p class="menu-note">Stash keeps your upload links’ folders here, so this folder can’t be renamed.</p>` : ''}`;
 }
 
 const menuItems = () => [...menuEl.querySelectorAll('[role=menuitem]:not(:disabled)')];
@@ -344,6 +348,25 @@ function closeMenu({ focus = false } = {}) {
   menuEl.innerHTML = '';
   if (trigger.hasAttribute('aria-expanded')) trigger.setAttribute('aria-expanded', 'false');
   if (focus && trigger.isConnected) trigger.focus();
+}
+
+// From the preview, the preview opens again after renaming, showing the new name.
+function renameForm(id, reopen = false) {
+  const it = store.item(id);
+  if (!it) return;
+  const isFile = it.type === 'file';
+  const req = store.requestForFolder(it.id);
+  showModal(html`<form data-submit="save-rename" data-id="${it.id}" data-reopen="${b(reopen)}">
+    ${modalHead(isFile ? 'Rename file' : 'Rename folder')}
+    <div class="modal-body">
+      <div class="field"><label for="r-name">Name</label><input id="r-name" name="name" class="input" required maxlength="${req ? 120 : 255}" value="${it.name}" autocomplete="off" autofocus></div>
+      ${req ? html`<p class="hint">The upload link gets the same name. People see it as the title of its upload page.</p>` : ''}
+    </div>
+    <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button type="submit" class="btn btn-primary">Rename</button></div>
+  </form>`, 'narrow');
+  // Select the name without its extension, so typing replaces only that.
+  const dot = it.name.lastIndexOf('.');
+  modal.querySelector('#r-name').setSelectionRange(0, isFile && dot > 0 ? dot : it.name.length);
 }
 
 /* ---------- Uploading your own files ---------- */
@@ -779,6 +802,7 @@ const actions = {
   'tray-toggle': () => { trayCollapsed = !trayCollapsed; renderTray(); },
   'tray-close': () => { uploads.length = 0; renderTray(); },
   'new-folder': () => folderForm(),
+  rename: (el) => renameForm(el.dataset.id, el.dataset.reopen === 'true'),
   logout: async () => {
     await request('POST', '/api/logout').catch(() => {});
     location.href = '/login';
@@ -874,6 +898,17 @@ const submits = {
       render();
       showCreatedShare(s);
     }
+  },
+  'save-rename': async (form) => {
+    const { id } = form.dataset;
+    const input = form.elements.name;
+    const name = input.value.trim();
+    const done = () => (form.dataset.reopen === 'true' ? openPreview(id) : modal.close());
+    if (/[/\\]/.test(name)) return invalid(input, 'Names can’t contain / or \\.');
+    if (name === store.item(id)?.name) return done();
+    setBusy(form, true);
+    if (await attempt(() => store.rename(id, name), `Renamed to ${name}`)) done();
+    setBusy(form, false);
   },
   'save-folder': async (form) => {
     setBusy(form, true);
