@@ -281,6 +281,15 @@ bin/stash -listen 127.0.0.1:8080 -data data -ui-dir ui
 With `-ui-dir ui`, edits to the pages show on reload without rebuilding. The data folder and `bin/`
 are ignored by git.
 
+### Building the image yourself
+
+```bash
+podman build -t stash .
+```
+
+The build stage runs on your own platform and cross-compiles, so `--platform linux/arm64` (or
+`linux/arm/v7`) builds an image for another machine just as fast, without emulation.
+
 ### Checking changes
 
 Until there are automated tests, check by hand:
