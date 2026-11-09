@@ -232,6 +232,9 @@ func TestOwnerEndpointsNeedTheOwner(t *testing.T) {
 		"POST /api/folders",
 		"POST /api/items/delete",
 		"PATCH /api/items/x",
+		"POST /api/items/trash",
+		"POST /api/items/restore",
+		"POST /api/trash/empty",
 		"GET /api/files/x/content",
 		"POST /api/uploads",
 		"GET /api/uploads/x",
@@ -732,17 +735,29 @@ func TestLoadConfig(t *testing.T) {
 			t.Errorf("-trusted-proxies %q is accepted", bad)
 		}
 	}
+	if cfg.TrashDays != 30 {
+		t.Errorf("trash days %d; want 30 when it isn't set", cfg.TrashDays)
+	}
+	if cfg, err := loadConfig("stash", []string{"-trash-days", " 7 "}); err != nil || cfg.TrashDays != 7 {
+		t.Errorf("-trash-days 7 gives %d, %v", cfg.TrashDays, err)
+	}
+	for _, bad := range []string{"0", "-1", "3651", "1.5", "a week", ""} {
+		if _, err := loadConfig("stash", []string{"-trash-days", bad}); err == nil || !strings.Contains(err.Error(), "use a whole number of days from 1 to 3650") {
+			t.Errorf("-trash-days %q gives %v", bad, err)
+		}
+	}
 	if _, err := loadConfig("stash", []string{"-no-such-flag"}); err == nil {
 		t.Error("an unknown flag is accepted")
 	}
 
 	t.Setenv("STASH_LISTEN", ":7000")
 	t.Setenv("STASH_TRUSTED_PROXIES", "172.16.0.0/12")
+	t.Setenv("STASH_TRASH_DAYS", "90")
 	cfg, err = loadConfig("stash", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Listen != ":7000" || len(cfg.TrustedProxies) != 1 || cfg.TrustedProxies[0].String() != "172.16.0.0/12" {
+	if cfg.Listen != ":7000" || len(cfg.TrustedProxies) != 1 || cfg.TrustedProxies[0].String() != "172.16.0.0/12" || cfg.TrashDays != 90 {
 		t.Errorf("settings from the environment aren't used: %+v", cfg)
 	}
 	cfg, _ = loadConfig("stash", []string{"-listen", ":7001"})

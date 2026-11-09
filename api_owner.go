@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -64,8 +63,9 @@ func (srv *server) handleState(w http.ResponseWriter, r *http.Request) {
 			Used int64 `json:"used"`
 			Free int64 `json:"free"`
 		} `json:"storage"`
-		Origin string `json:"origin"`
-	}{Items: []*Item{}, Links: []linkView{}, Shares: []shareView{}, Origin: srv.origin(r)}
+		Origin    string `json:"origin"`
+		TrashDays int    `json:"trashDays"`
+	}{Items: []*Item{}, Links: []linkView{}, Shares: []shareView{}, Origin: srv.origin(r), TrashDays: srv.cfg.TrashDays}
 	for _, it := range srv.st.items {
 		state.Items = append(state.Items, it)
 	}
@@ -103,7 +103,75 @@ func (srv *server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, it)
 }
 
-// handleDeleteItems deletes files. Folders stay, so nothing disappears by surprise.
+/* ---------- The trash ---------- */
+
+// handleTrashItems moves files and folders to the trash. They're deleted for good after
+// -trash-days, or earlier when the owner empties the trash.
+func (srv *server) handleTrashItems(w http.ResponseWriter, r *http.Request) {
+	var in struct{ IDs []string }
+	if !readJSON(w, r, &in) {
+		return
+	}
+	srv.st.mu.Lock()
+	defer srv.st.mu.Unlock()
+	if slices.Contains(in.IDs, rootID) || slices.Contains(in.IDs, requestsID) {
+		jsonError(w, http.StatusForbidden, "Stash needs this folder, so it can't be deleted.")
+		return
+	}
+	now := nowMillis()
+	trashed := 0
+	for _, id := range in.IDs {
+		if it := srv.st.items[id]; it != nil && !srv.st.inTrash(id) {
+			it.Trashed = now
+			trashed++
+		}
+	}
+	// Nobody should upload into the trash. Restoring the folder leaves the link revoked, so the
+	// owner decides whether to open it again.
+	for _, l := range srv.st.links {
+		if srv.st.inTrash(l.Folder) {
+			l.Revoked = true
+		}
+	}
+	if !srv.saveOrFail(w) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"trashed": trashed})
+}
+
+func (srv *server) handleRestoreItems(w http.ResponseWriter, r *http.Request) {
+	var in struct{ IDs []string }
+	if !readJSON(w, r, &in) {
+		return
+	}
+	srv.st.mu.Lock()
+	defer srv.st.mu.Unlock()
+	var items []*Item
+	for _, id := range in.IDs {
+		it := srv.st.items[id]
+		if it == nil || it.Trashed == 0 || slices.Contains(items, it) {
+			continue
+		}
+		// Something deleted before the folder it's in comes back with that folder, not on its own.
+		if srv.st.inTrash(it.Parent) {
+			jsonError(w, http.StatusConflict, fmt.Sprintf("%s is in a folder that's in the trash too. Restore that folder first.", it.Name))
+			return
+		}
+		items = append(items, it)
+	}
+	for _, it := range items {
+		// Its name may have been used again meanwhile. It's still in the trash here, so it doesn't clash with itself.
+		it.Name = srv.st.uniqueName(it.Parent, it.Name)
+		it.Trashed = 0
+	}
+	if !srv.saveOrFail(w) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"restored": len(items)})
+}
+
+// handleDeleteItems deletes items in the trash for good. Anything else has to go to the trash
+// first, so nothing is lost with one click.
 func (srv *server) handleDeleteItems(w http.ResponseWriter, r *http.Request) {
 	var in struct{ IDs []string }
 	if !readJSON(w, r, &in) {
@@ -111,21 +179,28 @@ func (srv *server) handleDeleteItems(w http.ResponseWriter, r *http.Request) {
 	}
 	srv.st.mu.Lock()
 	defer srv.st.mu.Unlock()
-	deleted := 0
+	var items []*Item
 	for _, id := range in.IDs {
-		it := srv.st.items[id]
-		if it == nil || it.Type != "file" {
-			continue
+		if it := srv.st.items[id]; it != nil && it.Trashed != 0 {
+			items = append(items, it)
 		}
-		if err := os.Remove(srv.st.blobPath(id)); err != nil && !os.IsNotExist(err) {
-			jsonError(w, http.StatusInternalServerError, fmt.Sprintf("Couldn't delete %s.", it.Name))
-			return
-		}
-		delete(srv.st.items, id)
-		deleted++
 	}
-	for _, s := range srv.st.shares {
-		s.Files = slices.DeleteFunc(s.Files, func(id string) bool { return srv.st.items[id] == nil })
+	srv.deleteForGood(w, items)
+}
+
+func (srv *server) handleEmptyTrash(w http.ResponseWriter, r *http.Request) {
+	srv.st.mu.Lock()
+	defer srv.st.mu.Unlock()
+	srv.deleteForGood(w, srv.st.trashedSince(0))
+}
+
+// deleteForGood removes items and answers with how many it removed. Hold st.mu.
+func (srv *server) deleteForGood(w http.ResponseWriter, items []*Item) {
+	deleted, err := srv.st.purgeAll(items)
+	if err != nil {
+		srv.st.save() // what was removed before the error stays removed
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	if !srv.saveOrFail(w) {
 		return
@@ -302,6 +377,10 @@ func (srv *server) handleUpdateLink(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusNotFound, "That upload link doesn't exist.")
 		return
 	}
+	if in.Revoked != nil && !*in.Revoked && srv.st.inTrash(l.Folder) {
+		jsonError(w, http.StatusConflict, "This link's folder is in the trash. Restore the folder first, then reopen the link.")
+		return
+	}
 	applyLink(l, &in, hash)
 	if in.Name != nil {
 		if folder := srv.st.items[l.Folder]; folder != nil {
@@ -358,6 +437,10 @@ func (srv *server) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	for _, id := range *in.Files {
 		if it := srv.st.items[id]; it == nil || it.Type != "file" {
 			jsonError(w, http.StatusBadRequest, "One of the files doesn't exist anymore.")
+			return
+		}
+		if srv.st.inTrash(id) {
+			jsonError(w, http.StatusBadRequest, "One of the files is in the trash. Restore it first.")
 			return
 		}
 		if !slices.Contains(s.Files, id) {

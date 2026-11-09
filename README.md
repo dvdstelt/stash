@@ -72,6 +72,8 @@ once.
 - Click a file to see it, download it, share it or delete it.
 - Every file and folder has a **⋯** button with everything you can do with it. Right-clicking a
   file or folder shows the same menu.
+- Deleting a file or folder moves it to the **Trash**. You can restore it from there for 30 days;
+  after that, it's deleted for good. **Empty trash** deletes everything in it right away.
 - Use the search box at the top to find files. Pressing `/` jumps to it.
 
 ### Asking someone for files: upload links
@@ -86,7 +88,8 @@ onto. They can't see files that are already there. If the link is full, has expi
 they get a clear message instead.
 
 Files arrive in **My files › Requests**, in a folder named after the link. Renaming that folder
-renames the link too. You can change a link's limits, revoke it or reopen it at any time.
+renames the link too, and deleting it revokes the link. You can change a link's limits, revoke it or
+reopen it at any time.
 
 ### Sending someone files: share links
 
@@ -96,6 +99,7 @@ renames the link too. You can change a link's limits, revoke it or reopen it at 
 3. Copy the link and send it.
 
 They see the files with previews, and can download them one by one or all together as a zip file.
+A file you delete disappears from the link, and comes back if you restore it from the trash.
 
 ### Very large files: the command line
 
@@ -231,7 +235,9 @@ Stash works without any settings. These two matter once it's on the internet:
 | `STASH_TRUSTED_PROXIES` | The address of the web server in front of Stash, if there is one. |
 
 Pass them with `-e NAME=value` in the `podman run` command, or put them in a file and use
-`--env-file`. The [technical guide](docs/technical.md) lists all settings.
+`--env-file`. To keep deleted files in the trash for another number of days than 30, set
+`STASH_TRASH_DAYS`, for example `-e STASH_TRASH_DAYS=7`. The [technical guide](docs/technical.md)
+lists all settings.
 
 ## For developers
 

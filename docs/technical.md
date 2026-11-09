@@ -27,7 +27,7 @@ Everything lives in one folder (`-data`, `/data` in the container):
 | Path | Contents |
 |---|---|
 | `stash.json` | All metadata: files and folders, upload links, share links, the owner's password hash, and a random secret for signing cookies. |
-| `files/<id>` | The contents of each file, named by a random ID. Names, folders and dates are only in `stash.json`. |
+| `files/<id>` | The contents of each file, named by a random ID. Names, folders and dates are only in `stash.json`. Files in the trash stay here until they're deleted for good. |
 | `uploads/<id>.part` | Uploads in progress. Cleared when Stash starts, because an upload can't continue after a restart. |
 
 `stash.json` is rewritten after every change: Stash writes a temporary file, syncs it to disk and
@@ -44,6 +44,7 @@ Every setting is a command-line flag or an environment variable.
 | `-data` | `STASH_DATA` | `data` (`/data` in the container) | The data folder. In a container this is a path *inside* the container: mount your folder there instead of changing it. |
 | `-public-url` | `STASH_PUBLIC_URL` | none | Base URL for links you hand out, such as `https://files.example.com`. Without it, Stash uses the address the owner's browser used. |
 | `-trusted-proxies` | `STASH_TRUSTED_PROXIES` | none | Comma-separated IPs or CIDRs of reverse proxies whose `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` headers Stash may believe. |
+| `-trash-days` | `STASH_TRASH_DAYS` | `30` | Days that deleted files and folders stay in the trash before they're deleted for good. From 1 to 3650. |
 | `-ui-dir` | `STASH_UI_DIR` | built in | Serve the pages from this folder instead of the embedded copy. For development. |
 
 Subcommand: `stash reset-password [-data DIR]` removes the owner password. Run it while Stash is
@@ -229,6 +230,30 @@ Some limits to know:
 - Uploads in progress count against the limit, so parallel uploads can't overshoot it.
 - A connection that sends nothing for 2 minutes is closed. Uploads themselves may take as long as
   they need.
+- Files in the trash still take up disk space. They don't count against an upload link's limit, so
+  deleting received files makes room on the link again.
+
+## The trash
+
+Deleting a file or folder moves it to the trash. Only the item the owner deleted gets a `trashed`
+time in `stash.json`; what's inside a deleted folder is in the trash through that folder and comes
+back with it.
+
+- **Out of sight.** Items in the trash don't show in folders or search, can't be added to a new
+  share link, and can't receive uploads. Share links leave out their files in the trash, on the page,
+  in the zip and on the command line, until the owner restores them.
+- **Upload links.** Deleting an upload link's folder revokes the link, so nobody uploads into the
+  trash. Restoring the folder leaves the link revoked; the owner reopens it when they want to. A link
+  can't be reopened while its folder is in the trash.
+- **Restoring.** An item goes back to the folder it came from. If its name was used again meanwhile,
+  it comes back as `name (2)`. Restoring something whose folder is in the trash too is refused:
+  restore the folder first. Something deleted before its folder stays in the trash when the folder
+  comes back.
+- **Deleting for good.** Every 10 minutes, and when Stash starts, items deleted more than
+  `-trash-days` ago are removed with everything in them. So are items the owner deletes from the
+  trash, or everything when they empty it. Share links forget those files, and an upload link whose
+  folder is gone is removed. An upload through that link that was still running is refused when it
+  ends, rather than landing in My files.
 
 ## How uploads work
 
@@ -271,8 +296,11 @@ status 200. That's 200 rather than 201, because wget2 doesn't print the reply of
 | `POST /api/login`, `POST /api/logout` | Sign in and out |
 | `GET /api/state` | Everything: items, links, shares, storage, public origin |
 | `POST /api/folders` | `{parent, name}` |
-| `POST /api/items/delete` | `{ids}`: delete files |
 | `PATCH /api/items/<id>` | `{name}`: rename a file or folder. A name already taken in that folder is refused. Renaming an upload link's folder renames the link too. |
+| `POST /api/items/trash` | `{ids}`: move files and folders to the trash |
+| `POST /api/items/restore` | `{ids}`: take them out of the trash again |
+| `POST /api/items/delete` | `{ids}`: delete items in the trash for good. Items that aren't in the trash are left alone. |
+| `POST /api/trash/empty` | Delete everything in the trash for good |
 | `GET /api/files/<id>/content` | File contents. Add `?download` to force a download. |
 | `POST /api/uploads`, `GET`/`PUT`/`DELETE /api/uploads/<id>` | Chunked upload |
 | `POST /api/links`, `PATCH /api/links/<id>` | Create or change an upload link |
@@ -315,7 +343,7 @@ Resuming doesn't count either, from the browser that started the download (see
 - Uploads can't continue after Stash restarts.
 - Resuming a share download from the command line (`curl -C -` without a cookie jar) counts as a
   new download, and so does resuming after Stash restarts.
-- Files and folders can't be moved to another folder yet, and folders can't be deleted yet.
+- Files and folders can't be moved to another folder yet.
 - The tests cover the server, not the page scripts. See [Checking changes](#checking-changes).
 
 ## Development
@@ -389,7 +417,9 @@ The tests don't cover the page scripts. After changing those, check by hand:
 2. Upload several files at once in the browser, including one larger than 32 MB.
 3. Create an upload link with a small limit and a password, and upload through its page.
 4. Create a share link, open it, and download one file and the zip.
-5. Look at the browser console for errors.
+5. Delete a shared file and a folder from their menu. Check that the share page leaves the file
+   out, restore both from the Trash, and empty the trash.
+6. Look at the browser console for errors.
 
 [AGENTS.md](../AGENTS.md) lists the conventions and the security rules changes must keep.
 

@@ -519,7 +519,7 @@ func TestShareZipSkipsMissingFiles(t *testing.T) {
 	a := e.upload(rootID, "a.txt", []byte("aaa"))
 	b := e.upload(rootID, "b.txt", []byte("bbb"))
 	s := e.createShare(nil, a, b)
-	e.expect(e.api(http.MethodPost, "/api/items/delete", map[string]any{"ids": []string{a.ID}}), http.StatusOK)
+	e.trash(a.ID)
 
 	got := readZip(t, e.expect(e.get("/s/"+s.Token+"/all.zip"), http.StatusOK).body)
 	if len(got) != 1 || got["b.txt"] != "bbb" {

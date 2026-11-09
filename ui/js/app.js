@@ -38,6 +38,7 @@ function render() {
   if (state.query) content = searchView();
   else if (section === 'upload-links') content = id ? requestDetail(id) : requestList();
   else if (section === 'share-links') content = id ? shareDetail(id) : shareList();
+  else if (section === 'trash') content = trashView();
   else content = filesView(id ?? 'root');
   viewEl.innerHTML = content.s;
   renderSidebar(state.query ? null : section);
@@ -62,6 +63,9 @@ function renderSidebar(section) {
   const open = store.requests().filter((r) => store.status(r) === 'active');
   $('#count-upload').textContent = open.length || '';
   $('#count-share').textContent = store.shares().filter((s) => store.shareStatus(s) === 'active').length || '';
+  const trash = store.trash();
+  $('#count-trash').textContent = trash.length || '';
+  const trashBytes = trash.reduce((sum, it) => sum + store.contents(it.id).bytes, 0);
 
   const used = store.used();
   const capacity = store.capacity() || 1;
@@ -70,7 +74,7 @@ function renderSidebar(section) {
   $('#storage').innerHTML = html`
     <div class="storage-head"><span>Storage</span><span class="muted">${bytes(used)} used</span></div>
     <div class="meter" title="Used, plus what open upload links could still add"><span style="width:${pct(used)}"></span><span class="reserved" style="width:${pct(promised)}"></span></div>
-    <p class="hint">${bytes(store.free())} free on the disk. Open upload links can add up to ${bytes(promised)}.</p>`.s;
+    <p class="hint">${bytes(store.free())} free on the disk. Open upload links can add up to ${bytes(promised)}.${trashBytes ? ` The trash holds ${bytes(trashBytes)}.` : ''}</p>`.s;
 }
 
 /** Runs a change on the server and shows the result. Returns the result, or false if it failed. */
@@ -156,6 +160,7 @@ function invalid(input, message) {
 function filesView(folderId) {
   const folder = store.item(folderId);
   if (!folder || folder.type !== 'folder') return notFound('This folder doesn’t exist.', '#/files', 'My files');
+  if (store.inTrash(folder.id)) return notFound('This folder is in the trash.', '#/trash', 'Trash');
   state.folder = folder.id;
   const crumbs = store.path(folder.id);
   const kids = store.children(folder.id);
@@ -312,10 +317,10 @@ function itemMenu(it) {
     <button type="button" role="menuitem" data-action="open" data-id="${it.id}">${icon(file ? 'eye' : 'folder')}${file ? 'Preview' : 'Open'}</button>
     ${file ? html`<a role="menuitem" href="${store.contentUrl(it.id)}?download" download>${icon('download')}Download</a>` : ''}
     <button type="button" role="menuitem" data-action="rename" data-id="${it.id}" ${fixed ? raw('disabled') : ''}>${icon('pencil')}Rename…</button>
-    ${file ? html`<button type="button" role="menuitem" data-action="share-files" data-ids="${it.id}">${icon('link')}Create share link…</button>
-      <div role="separator"></div>
-      <button type="button" role="menuitem" class="danger" data-action="delete" data-ids="${it.id}">${icon('trash')}Delete</button>` : ''}
-    ${fixed ? html`<p class="menu-note">Stash keeps your upload links’ folders here, so this folder can’t be renamed.</p>` : ''}`;
+    ${file ? html`<button type="button" role="menuitem" data-action="share-files" data-ids="${it.id}">${icon('link')}Create share link…</button>` : ''}
+    <div role="separator"></div>
+    <button type="button" role="menuitem" class="danger" data-action="delete" data-ids="${it.id}" ${fixed ? raw('disabled') : ''}>${icon('trash')}Delete…</button>
+    ${fixed ? html`<p class="menu-note">Stash keeps your upload links’ folders here, so this folder can’t be renamed or deleted.</p>` : ''}`;
 }
 
 const menuItems = () => [...menuEl.querySelectorAll('[role=menuitem]:not(:disabled)')];
@@ -451,16 +456,110 @@ function renderTray() {
     <div class="tray-body" aria-live="polite">${uploads.map((u) => uploadRow(u))}</div>`.s;
 }
 
+const filesIn = (it) => (it.type === 'file' ? [it] : store.children(it.id).flatMap(filesIn));
+
+// Deleting moves things to the trash. The dialog says what goes, for how long it can come back,
+// and what stops working meanwhile.
 function confirmDelete(ids) {
-  const names = ids.map((id) => store.item(id)?.name).filter(Boolean);
+  const its = ids.map((id) => store.item(id)).filter(Boolean);
+  if (!its.length) return;
+  const one = its.length === 1 ? its[0] : null;
+  const files = new Set(its.flatMap(filesIn).map((f) => f.id));
+  const many = !one || one.type === 'folder';
+  const [pron, being] = many ? ['them', 'they’re'] : ['it', 'it’s'];
+  const parts = [];
+  if (one?.type === 'folder') {
+    parts.push(files.size
+      ? `The folder and the ${plural(files.size, 'file')} in it (${bytes(store.size(one.id))}) move to the trash.`
+      : 'The folder moves to the trash.');
+  } else {
+    parts.push(`${one ? 'It moves' : 'They move'} to the trash.`);
+  }
+  parts.push(`You can restore ${pron} from there for ${plural(store.trashDays(), 'day')}. After that, ${being} deleted for good.`);
+  const links = store.requests().filter((r) => !r.revoked && store.path(r.folder).some((p) => ids.includes(p.id)));
+  if (links.length === 1) parts.push(`The upload link “${links[0].name}” stops working.`);
+  else if (links.length) parts.push(`${links.length} upload links stop working.`);
+  if (store.shares().some((s) => store.shareStatus(s) === 'active' && s.files.some((id) => files.has(id)))) {
+    parts.push(`Share links leave ${pron} out while ${being} in the trash.`);
+  }
   confirmModal({
-    title: names.length === 1 ? `Delete “${names[0]}”?` : `Delete ${names.length} files?`,
-    body: 'They’re removed from your files and from any share links. This can’t be undone.',
+    title: one ? `Delete “${one.name}”?` : `Delete ${plural(its.length, 'item')}?`,
+    body: parts.join(' '),
     confirm: 'Delete',
     onConfirm: () => attempt(async () => {
-      await store.remove(ids);
+      await store.moveToTrash(ids);
       ids.forEach((id) => state.selected.delete(id));
-    }, `Deleted ${plural(names.length, 'file')}`),
+    }, `Moved ${one ? one.name : plural(its.length, 'item')} to the trash`),
+  });
+}
+
+/* ---------- The trash ---------- */
+
+function trashView() {
+  const items = store.trash();
+  const size = items.reduce((sum, it) => sum + store.contents(it.id).bytes, 0);
+  return html`
+    <div class="page-head">
+      <div><h1>Trash</h1><p>Deleted files and folders stay here for ${plural(store.trashDays(), 'day')}. After that, they’re deleted for good.</p></div>
+      ${items.length ? html`<button type="button" class="btn btn-danger" data-action="empty-trash">${icon('trash')} Empty trash</button>` : ''}
+    </div>
+    ${items.length
+      ? html`<div class="table rows-trash">
+          <div class="row head"><span>Name</span><span>Size</span><span>Deleted</span><span></span></div>
+          ${items.map((it) => trashRow(it))}
+        </div>
+        <p class="hint trash-total">${plural(items.length, 'item')}, ${bytes(size)}. Until they’re deleted for good, they still take up space on the disk.</p>`
+      : html`<div class="card empty">${icon('trash')}<p>The trash is empty.</p></div>`}`;
+}
+
+function trashRow(it) {
+  const { files, bytes: size } = store.contents(it.id);
+  const left = store.purgeAt(it) - Date.now();
+  const gone = left <= 0 ? 'Deleted for good soon' : left < 864e5 ? 'Deleted for good within a day' : `Deleted for good in ${plural(Math.round(left / 864e5), 'day')}`;
+  return html`<div class="row">
+    <span class="name-cell"><span class="mini">${thumb(it)}</span><span class="min0 stack"><span class="ellipsis strong">${it.name}</span><span class="ellipsis muted small">From ${pathText(it.parent)}${it.type === 'folder' ? ` · ${plural(files, 'file')}` : ''}</span></span></span>
+    <span class="muted nowrap"><span class="m-label">Size: </span>${bytes(size)}</span>
+    <span class="stack"><span class="nowrap">${rel(it.trashed)}</span><span class="muted small nowrap">${gone}</span></span>
+    <span class="row-actions">
+      <button type="button" class="btn btn-sm" data-action="restore" data-id="${it.id}">${icon('undo')} Restore</button>
+      <button type="button" class="icon-btn btn-ghost btn-danger" data-action="delete-for-good" data-id="${it.id}" aria-label="Delete ${it.name} for good" title="Delete for good">${icon('trash')}</button>
+    </span>
+  </div>`;
+}
+
+function restoreItem(id) {
+  const it = store.item(id);
+  if (!it) return;
+  const where = store.item(it.parent)?.name ?? 'My files';
+  const link = store.requests().some((r) => store.path(r.folder).some((p) => p.id === id));
+  attempt(() => store.restore([id]), `Restored ${it.name} to ${where}.${link ? ' Its upload link stays revoked.' : ''}`);
+}
+
+function confirmDeleteForGood(id) {
+  const it = store.item(id);
+  if (!it) return;
+  const { files, bytes: size } = store.contents(id);
+  const link = store.requests().some((r) => store.path(r.folder).some((p) => p.id === id));
+  confirmModal({
+    title: `Delete “${it.name}” for good?`,
+    body: [
+      it.type === 'folder' && files ? `The folder and the ${plural(files, 'file')} in it (${bytes(size)}) are deleted.` : '',
+      link ? 'Its upload link is deleted too.' : '',
+      'This can’t be undone.',
+    ].filter(Boolean).join(' '),
+    confirm: 'Delete for good',
+    onConfirm: () => attempt(() => store.deleteForGood([id]), `Deleted ${it.name} for good`),
+  });
+}
+
+function confirmEmptyTrash() {
+  const items = store.trash();
+  const size = items.reduce((sum, it) => sum + store.contents(it.id).bytes, 0);
+  confirmModal({
+    title: 'Empty the trash?',
+    body: `${items.length === 1 ? 'The item in it' : `The ${items.length} items in it`} (${bytes(size)}) ${items.length === 1 ? 'is' : 'are'} deleted for good. This can’t be undone.`,
+    confirm: 'Empty trash',
+    onConfirm: () => attempt(() => store.emptyTrash(), 'The trash is empty'),
   });
 }
 
@@ -514,7 +613,9 @@ function requestDetail(id) {
     <div class="page-head">
       <div>
         <h1 class="title-row"><span class="ellipsis">${r.name}</span>${badge(status)}</h1>
-        <p>Created ${date(r.created)} · files go to <a href="#/files/${r.folder}">${pathText(r.folder)}</a></p>
+        <p>Created ${date(r.created)} · ${store.inTrash(r.folder)
+          ? html`its folder is in the <a href="#/trash">trash</a>`
+          : html`files go to <a href="#/files/${r.folder}">${pathText(r.folder)}</a>`}</p>
       </div>
       <div class="actions">
         ${closed
@@ -678,6 +779,7 @@ function shareDetail(id) {
   const s = store.share(id);
   if (!s) return notFound('This share link doesn’t exist.', '#/share-links', 'share links');
   const files = store.shareFiles(s);
+  const trashedFiles = store.sharedInTrash(s);
   const status = store.shareStatus(s);
   const url = shareUrl(s);
   return html`
@@ -703,6 +805,7 @@ function shareDetail(id) {
     ${status === 'active' ? html`<section class="section"><h2>Send this link</h2><div class="card">${linkPanel(url, shareSnippets(url, s), `/s/${s.token}`)}</div></section>` : ''}
     <section class="section">
       <h2>Files in this share</h2>
+      ${trashedFiles ? html`<p class="hint section-hint">${trashedFiles === 1 ? '1 file is' : `${trashedFiles} files are`} in the <a href="#/trash">trash</a>, so visitors don’t see ${trashedFiles === 1 ? 'it' : 'them'}. Restore ${trashedFiles === 1 ? 'it' : 'them'} to share ${trashedFiles === 1 ? 'it' : 'them'} again.</p>` : ''}
       ${files.length ? html`<div class="grid">${files.map((f) => tile(f, false))}</div>` : html`<div class="card empty">${icon('file')}<p>All files in this share were deleted.</p></div>`}
     </section>`;
 }
@@ -849,6 +952,9 @@ const actions = {
     confirm: 'Revoke link',
     onConfirm: () => attempt(() => store.updateShare(el.dataset.id, { revoked: true }), 'Share link revoked'),
   }),
+  restore: (el) => restoreItem(el.dataset.id),
+  'delete-for-good': (el) => confirmDeleteForGood(el.dataset.id),
+  'empty-trash': () => confirmEmptyTrash(),
   'reopen-share': (el) => attempt(() => store.updateShare(el.dataset.id, { revoked: false, expiresDays: 7, maxDownloads: 0 }), 'Share link reopened for 7 days'),
 };
 

@@ -13,6 +13,7 @@ let links = [];
 let shares = [];
 let storage = { used: 0, free: 0 };
 let origin = location.origin;
+let trashDays = 30;
 
 const contentUrl = (id) => `/api/files/${encodeURIComponent(id)}/content`;
 const uploadUrl = (r) => `${origin}/d/${r.token}`;
@@ -34,6 +35,7 @@ function ingest(state) {
   shares = state.shares;
   storage = state.storage;
   origin = state.origin;
+  trashDays = state.trashDays;
 }
 
 const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
@@ -44,8 +46,9 @@ const store = {
 
   item: (id) => items.get(id),
 
+  /** What's in a folder, leaving out what's in the trash. */
   children(id) {
-    const kids = [...items.values()].filter((i) => i.parent === id);
+    const kids = [...items.values()].filter((i) => i.parent === id && !i.trashed);
     return [...kids.filter((i) => i.type === 'folder').sort(byName), ...kids.filter((i) => i.type === 'file').sort(byName)];
   },
 
@@ -55,11 +58,17 @@ const store = {
     return out;
   },
 
-  files: () => [...items.values()].filter((i) => i.type === 'file'),
+  /** Whether an item, or a folder it's in, was deleted. */
+  inTrash(id) {
+    for (let it = items.get(id); it; it = items.get(it.parent)) if (it.trashed) return true;
+    return false;
+  },
+
+  files() { return [...items.values()].filter((i) => i.type === 'file' && !this.inTrash(i.id)); },
 
   search(query) {
     const q = query.toLowerCase();
-    return [...items.values()].filter((i) => i.id !== 'root' && i.name.toLowerCase().includes(q)).sort(byName);
+    return [...items.values()].filter((i) => i.id !== 'root' && i.name.toLowerCase().includes(q) && !this.inTrash(i.id)).sort(byName);
   },
 
   size(id) {
@@ -67,6 +76,22 @@ const store = {
     if (!it) return 0;
     if (it.type === 'file') return it.size;
     return this.children(id).reduce((sum, c) => sum + this.size(c.id), 0);
+  },
+
+  /** Everything in a folder, the trash included: what deleting it for good removes. */
+  contents(id) {
+    const out = { files: 0, bytes: 0 };
+    const walk = (it) => {
+      if (it.type === 'file') {
+        out.files++;
+        out.bytes += it.size;
+      } else {
+        for (const c of items.values()) if (c.parent === it.id) walk(c);
+      }
+    };
+    const it = items.get(id);
+    if (it) walk(it);
+    return out;
   },
 
   used: () => storage.used,
@@ -85,8 +110,28 @@ const store = {
     await this.load();
   },
 
-  async remove(ids) {
+  // The trash: deleted items, without what's inside a deleted folder, newest first.
+  trash() { return [...items.values()].filter((i) => i.trashed && !this.inTrash(i.parent)).sort((a, b) => b.trashed - a.trashed); },
+  trashDays: () => trashDays,
+  purgeAt: (it) => it.trashed + trashDays * 864e5,
+
+  async moveToTrash(ids) {
+    await request('POST', '/api/items/trash', { ids });
+    await this.load();
+  },
+
+  async restore(ids) {
+    await request('POST', '/api/items/restore', { ids });
+    await this.load();
+  },
+
+  async deleteForGood(ids) {
     await request('POST', '/api/items/delete', { ids });
+    await this.load();
+  },
+
+  async emptyTrash() {
+    await request('POST', '/api/trash/empty');
     await this.load();
   },
 
@@ -122,7 +167,9 @@ const store = {
   // Share links
   shares: () => [...shares].sort((a, b) => b.created - a.created),
   share: (id) => shares.find((s) => s.id === id),
-  shareFiles: (s) => s.files.map((id) => items.get(id)).filter(Boolean),
+  /** The files a share link offers. Files in the trash are left out, as they are for visitors. */
+  shareFiles(s) { return s.files.map((id) => items.get(id)).filter((it) => it && !this.inTrash(it.id)); },
+  sharedInTrash(s) { return s.files.filter((id) => items.has(id) && this.inTrash(id)).length; },
 
   shareStatus(s) {
     if (s.revoked) return 'revoked';

@@ -78,6 +78,9 @@ func (srv *server) startUpload(name, parent string, link *Link, size int64) (*up
 	if folder := srv.st.items[parent]; folder == nil || folder.Type != "folder" {
 		return nil, &httpError{http.StatusNotFound, "That folder doesn't exist anymore."}
 	}
+	if srv.st.inTrash(parent) {
+		return nil, &httpError{http.StatusNotFound, "That folder is in the trash. Restore it first."}
+	}
 	if len(srv.uploads) >= maxUploadsTotal || (link != nil && srv.pending[link.ID] >= maxUploadsPerLink) {
 		return nil, &httpError{http.StatusTooManyRequests, "Too many uploads are running at the same time. Try again in a moment."}
 	}
@@ -208,7 +211,13 @@ func (srv *server) finishLocked(u *upload) (*Item, error) {
 	defer srv.st.mu.Unlock()
 	defer srv.releaseLocked(u)
 	parent := srv.st.items[u.parent]
-	if parent == nil { // the folder was deleted while the upload ran
+	if parent == nil && u.linkID != "" {
+		// The link's folder was deleted for good while the upload ran, and the link with it. A
+		// stranger's file doesn't belong among the owner's own files.
+		os.Remove(srv.st.partPath(u.id))
+		return nil, &httpError{http.StatusGone, "This upload link doesn't work anymore. Ask the person who sent it for a new one."}
+	}
+	if parent == nil { // the owner deleted the folder for good while the upload ran
 		parent = srv.st.items[rootID]
 	}
 	now := nowMillis()

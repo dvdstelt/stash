@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -24,6 +25,7 @@ type config struct {
 	PublicURL      string
 	TrustedProxies []netip.Prefix
 	UIDir          string
+	TrashDays      int
 }
 
 func main() {
@@ -76,9 +78,15 @@ func loadConfig(name string, args []string) (config, error) {
 	fs.StringVar(&cfg.PublicURL, "public-url", env("STASH_PUBLIC_URL", ""), "base URL used in links you hand out, e.g. https://files.example.com (default: the address you use to open Stash)")
 	proxies := fs.String("trusted-proxies", env("STASH_TRUSTED_PROXIES", ""), "comma-separated IPs or CIDRs of reverse proxies whose X-Forwarded-For and X-Forwarded-Proto headers are trusted")
 	fs.StringVar(&cfg.UIDir, "ui-dir", env("STASH_UI_DIR", ""), "serve the web pages from this directory instead of the built-in copy (for development)")
+	trashDays := fs.String("trash-days", env("STASH_TRASH_DAYS", "30"), "days that deleted files and folders stay in the trash before they're deleted for good")
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
 	}
+	days, err := strconv.Atoi(strings.TrimSpace(*trashDays))
+	if err != nil || days < 1 || days > 3650 {
+		return cfg, fmt.Errorf("trash days %q: use a whole number of days from 1 to 3650", *trashDays)
+	}
+	cfg.TrashDays = days
 	cfg.PublicURL = strings.TrimRight(cfg.PublicURL, "/")
 	for _, p := range strings.Split(*proxies, ",") {
 		p = strings.TrimSpace(p)

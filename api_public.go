@@ -175,12 +175,14 @@ func (srv *server) shareFor(r *http.Request) (s Share, status string) {
 	return s, shareStatus(found)
 }
 
+// shareFiles returns the files of a share that can be downloaded: the owner may have deleted some
+// since, and files in the trash are only theirs to see.
 func (srv *server) shareFiles(s *Share) []Item {
 	srv.st.mu.Lock()
 	defer srv.st.mu.Unlock()
 	var out []Item
 	for _, id := range s.Files {
-		if it := srv.st.items[id]; it != nil {
+		if it := srv.st.items[id]; it != nil && !srv.st.inTrash(id) {
 			out = append(out, *it)
 		}
 	}

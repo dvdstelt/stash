@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -25,6 +26,10 @@ type Item struct {
 	Name     string `json:"name"`
 	Size     int64  `json:"size,omitempty"`
 	Modified int64  `json:"modified"` // Unix milliseconds, like JavaScript's Date.now()
+
+	// Trashed is when the owner deleted the item, or 0. Only the item they deleted gets it: what's
+	// inside a deleted folder is in the trash through that folder, and comes back with it.
+	Trashed int64 `json:"trashed,omitempty"`
 }
 
 // Link is an upload link: anyone with its token can add files to one folder, up to its limits.
@@ -170,6 +175,7 @@ func (st *store) save() error {
 	return nil
 }
 
+// children returns everything directly in a folder, including what's in the trash.
 func (st *store) children(parent string) []*Item {
 	var out []*Item
 	for _, it := range st.items {
@@ -180,10 +186,82 @@ func (st *store) children(parent string) []*Item {
 	return out
 }
 
-// uniqueName returns name, or "name (2).ext" and so on if the folder already has an item with that name.
+// liveChildren returns what's directly in a folder, leaving out what's in the trash.
+func (st *store) liveChildren(parent string) []*Item {
+	return slices.DeleteFunc(st.children(parent), func(it *Item) bool { return it.Trashed != 0 })
+}
+
+// inTrash says whether an item, or a folder it's in, was deleted.
+func (st *store) inTrash(id string) bool {
+	for it := st.items[id]; it != nil; it = st.items[it.Parent] {
+		if it.Trashed != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// purge deletes an item for good: a file's contents, or a folder with everything in it. Call
+// dropDangling once afterwards.
+func (st *store) purge(it *Item) error {
+	if it.Type == "folder" {
+		for _, child := range st.children(it.ID) {
+			if err := st.purge(child); err != nil {
+				return err
+			}
+		}
+	} else if err := os.Remove(st.blobPath(it.ID)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	delete(st.items, it.ID)
+	return nil
+}
+
+// trashedSince returns the items deleted before the given time (Unix milliseconds), or all
+// deleted items for 0.
+func (st *store) trashedSince(before int64) []*Item {
+	var out []*Item
+	for _, it := range st.items {
+		if it.Trashed != 0 && (before == 0 || it.Trashed < before) {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+// purgeAll deletes items for good, skipping any that went already with a folder they were in,
+// and says how many it deleted.
+func (st *store) purgeAll(items []*Item) (int, error) {
+	deleted := 0
+	var err error
+	for _, it := range items {
+		if st.items[it.ID] != it {
+			continue
+		}
+		if err = st.purge(it); err != nil {
+			err = fmt.Errorf("Couldn't delete %s: %w", it.Name, err)
+			break
+		}
+		deleted++
+	}
+	st.dropDangling()
+	return deleted, err
+}
+
+// dropDangling forgets what pointed at items that are gone: files in share links, and upload
+// links whose folder was deleted for good.
+func (st *store) dropDangling() {
+	for _, s := range st.shares {
+		s.Files = slices.DeleteFunc(s.Files, func(id string) bool { return st.items[id] == nil })
+	}
+	st.links = slices.DeleteFunc(st.links, func(l *Link) bool { return st.items[l.Folder] == nil })
+}
+
+// uniqueName returns name, or "name (2).ext" and so on if the folder already has an item with
+// that name. Items in the trash don't count, so their names can be used again.
 func (st *store) uniqueName(parent, name string) string {
 	taken := map[string]bool{}
-	for _, it := range st.children(parent) {
+	for _, it := range st.liveChildren(parent) {
 		taken[strings.ToLower(it.Name)] = true
 	}
 	if !taken[strings.ToLower(name)] {
@@ -202,9 +280,10 @@ func (st *store) uniqueName(parent, name string) string {
 	}
 }
 
-// nameTaken says whether another item in the folder already has this name, ignoring case.
+// nameTaken says whether another item in the folder already has this name, ignoring case and
+// what's in the trash.
 func (st *store) nameTaken(parent, name, except string) bool {
-	for _, it := range st.children(parent) {
+	for _, it := range st.liveChildren(parent) {
 		if it.ID != except && strings.EqualFold(it.Name, name) {
 			return true
 		}
@@ -265,8 +344,9 @@ func (st *store) shareByID(id string) *Share {
 }
 
 // linkUsage is the space used by, and the number of, files already received through a link.
+// Files the owner deleted don't count, so deleting them makes room on the link again.
 func (st *store) linkUsage(l *Link) (used int64, files int) {
-	for _, it := range st.children(l.Folder) {
+	for _, it := range st.liveChildren(l.Folder) {
 		if it.Type == "file" {
 			used += it.Size
 			files++

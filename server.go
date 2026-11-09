@@ -105,8 +105,11 @@ func (srv *server) routes() http.Handler {
 	// Owner: files, upload links, share links
 	mux.HandleFunc("GET /api/state", srv.owner(srv.handleState))
 	mux.HandleFunc("POST /api/folders", srv.owner(srv.handleCreateFolder))
-	mux.HandleFunc("POST /api/items/delete", srv.owner(srv.handleDeleteItems))
 	mux.HandleFunc("PATCH /api/items/{id}", srv.owner(srv.handleRenameItem))
+	mux.HandleFunc("POST /api/items/trash", srv.owner(srv.handleTrashItems))
+	mux.HandleFunc("POST /api/items/restore", srv.owner(srv.handleRestoreItems))
+	mux.HandleFunc("POST /api/items/delete", srv.owner(srv.handleDeleteItems))
+	mux.HandleFunc("POST /api/trash/empty", srv.owner(srv.handleEmptyTrash))
 	mux.HandleFunc("GET /api/files/{id}/content", srv.owner(srv.handleFileContent))
 	mux.HandleFunc("POST /api/uploads", srv.owner(srv.handleOwnerUploadStart))
 	mux.HandleFunc("GET /api/uploads/{id}", srv.owner(srv.ownerUpload(srv.handleUploadStatus)))
@@ -369,11 +372,13 @@ func (srv *server) downloadOnly(it *Item) bool {
 
 /* ---------- Housekeeping ---------- */
 
-// janitor drops expired sign-ins, old password failures and uploads nobody finished in a day.
+// janitor drops expired sign-ins, old password failures and uploads nobody finished in a day,
+// and empties the trash of what was deleted more than -trash-days ago.
 func (srv *server) janitor(ctx context.Context) {
 	tick := time.NewTicker(10 * time.Minute)
 	defer tick.Stop()
 	for {
+		srv.emptyOldTrash()
 		select {
 		case <-ctx.Done():
 			return
@@ -401,6 +406,28 @@ func (srv *server) janitor(ctx context.Context) {
 				u.mu.Unlock()
 			}
 		}
+	}
+}
+
+func (srv *server) emptyOldTrash() {
+	srv.st.mu.Lock()
+	defer srv.st.mu.Unlock()
+	cutoff := time.Now().AddDate(0, 0, -srv.cfg.TrashDays).UnixMilli()
+	old := srv.st.trashedSince(cutoff)
+	if len(old) == 0 {
+		return
+	}
+	deleted, err := srv.st.purgeAll(old)
+	if err != nil {
+		log.Printf("emptying the trash: %v", err)
+	}
+	if deleted == 1 {
+		log.Printf("Deleted 1 item for good: it was in the trash for %d days.", srv.cfg.TrashDays)
+	} else if deleted > 1 {
+		log.Printf("Deleted %d items for good: they were in the trash for %d days.", deleted, srv.cfg.TrashDays)
+	}
+	if err := srv.st.save(); err != nil {
+		log.Printf("saving metadata: %v", err)
 	}
 }
 

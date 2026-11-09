@@ -226,6 +226,12 @@ legend { padding: 0; }
 
 .rows-links .row { grid-template-columns: minmax(0, 2.6fr) minmax(120px, 1fr) 52px 116px 84px 34px; }
 .rows-shares .row { grid-template-columns: minmax(0, 2.2fr) 130px 90px 120px 110px 34px; }
+.rows-trash .row { grid-template-columns: minmax(0, 1fr) 90px 170px auto; }
+.row-actions { display: flex; align-items: center; gap: 4px; }
+.row-actions .icon-btn.btn-danger { color: var(--danger); }
+.row-actions .icon-btn.btn-danger:hover { background: var(--danger-soft); }
+.trash-total { margin-top: 10px; }
+.section-hint { margin-bottom: 12px; }
 .rows-files .row { grid-template-columns: 20px minmax(0, 1fr) 96px 130px 30px; }
 .rows-files.no-select .row { grid-template-columns: minmax(0, 1fr) 96px 130px 30px; }
 
@@ -500,6 +506,9 @@ dialog.modal > form { display: flex; flex: 1; flex-direction: column; min-height
   .rows-files .row { grid-template-columns: 20px minmax(0, 1fr) auto 30px; }
   .rows-files.no-select .row { grid-template-columns: minmax(0, 1fr) auto 30px; }
   .rows-files .col-date { display: none; }
+  .rows-trash .row { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+  .rows-trash .name-cell { flex: 1 1 100%; }
+  .rows-trash .row-actions { margin-left: auto; }
 }
 
 @media (max-width: 640px) {

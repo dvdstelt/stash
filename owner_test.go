@@ -10,11 +10,12 @@ import (
 )
 
 type ownerState struct {
-	Items   []Item
-	Links   []linkView
-	Shares  []shareView
-	Storage struct{ Used, Free int64 }
-	Origin  string
+	Items     []Item
+	Links     []linkView
+	Shares    []shareView
+	Storage   struct{ Used, Free int64 }
+	Origin    string
+	TrashDays int
 }
 
 func (e *testEnv) state() ownerState {
@@ -113,37 +114,6 @@ func TestCreateFolder(t *testing.T) {
 	if got := st.items[inner.ID]; got == nil || got.Name != "2025" {
 		t.Errorf("after a restart the folder is %+v", got)
 	}
-}
-
-func TestDeleteFiles(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t)
-	a := e.upload(rootID, "a.txt", []byte("aaa"))
-	b := e.upload(rootID, "b.txt", []byte("bbb"))
-	var folder Item
-	e.expect(e.api(http.MethodPost, "/api/folders", map[string]string{"parent": rootID, "name": "Keep"}), http.StatusCreated).decode(t, &folder)
-	s := e.createShare(nil, a, b)
-
-	var out struct{ Deleted int }
-	e.expect(e.api(http.MethodPost, "/api/items/delete", map[string]any{"ids": []string{a.ID, folder.ID, rootID, "nope"}}), http.StatusOK).decode(t, &out)
-	if out.Deleted != 1 {
-		t.Errorf("deleted %d; want 1 (folders stay)", out.Deleted)
-	}
-	if _, err := os.Stat(e.srv.st.blobPath(a.ID)); !os.IsNotExist(err) {
-		t.Errorf("the deleted file's contents are still on disk: %v", err)
-	}
-	names := map[string]bool{}
-	for _, it := range e.state().Items {
-		names[it.ID] = true
-	}
-	if names[a.ID] || !names[b.ID] || !names[folder.ID] || !names[rootID] {
-		t.Errorf("items after deleting: %v", names)
-	}
-	if files := e.share(s.ID).Files; len(files) != 1 || files[0] != b.ID {
-		t.Errorf("share files = %v; want only %s", files, b.ID)
-	}
-	e.expect(e.get("/s/"+s.Token+"/files/"+a.ID), http.StatusNotFound)
-	e.expect(e.send(e.owner, http.MethodGet, "/api/files/"+a.ID+"/content", nil), http.StatusNotFound)
 }
 
 func TestRename(t *testing.T) {
