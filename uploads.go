@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,15 +26,12 @@ type upload struct {
 	reserved int64  // bytes set aside for this upload
 	received int64
 	file     *os.File
-	touched  time.Time
+	touched  atomic.Int64 // when the last bytes arrived, in Unix nanoseconds; read without mu
 	done     bool
 }
 
-func (u *upload) lastActive() time.Time {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return u.touched
-}
+func (u *upload) touch()                { u.touched.Store(time.Now().UnixNano()) }
+func (u *upload) lastActive() time.Time { return time.Unix(0, u.touched.Load()) }
 
 // httpError carries a status code and a message meant for the person uploading.
 type httpError struct {
@@ -52,7 +50,15 @@ func errorStatus(err error) (int, string) {
 	return http.StatusInternalServerError, "Something went wrong on the server."
 }
 
-const diskReserve = 512 << 20 // never fill the disk completely
+const (
+	diskReserve = 512 << 20 // never fill the disk completely
+
+	// Every upload in progress holds an open file and the space it asked for, so only so many
+	// may run at once. Browsers send four files at a time, which leaves room for several people
+	// on one link.
+	maxUploadsPerLink = 25
+	maxUploadsTotal   = 250
+)
 
 // spaceLeft is the free disk space minus what uploads in progress may still use. Hold st.mu.
 func (srv *server) spaceLeft() int64 {
@@ -71,6 +77,9 @@ func (srv *server) startUpload(name, parent string, link *Link, size int64) (*up
 
 	if folder := srv.st.items[parent]; folder == nil || folder.Type != "folder" {
 		return nil, &httpError{http.StatusNotFound, "That folder doesn't exist anymore."}
+	}
+	if len(srv.uploads) >= maxUploadsTotal || (link != nil && srv.pending[link.ID] >= maxUploadsPerLink) {
+		return nil, &httpError{http.StatusTooManyRequests, "Too many uploads are running at the same time. Try again in a moment."}
 	}
 	limit := srv.spaceLeft()
 	tooLarge := fmt.Sprintf("Not enough space on the server: %s is free.", formatBytes(limit))
@@ -91,7 +100,8 @@ func (srv *server) startUpload(name, parent string, link *Link, size int64) (*up
 		return nil, &httpError{http.StatusRequestEntityTooLarge, tooLarge}
 	}
 
-	u := &upload{id: newID(), name: name, parent: parent, size: size, reserved: size, touched: time.Now()}
+	u := &upload{id: newID(), name: name, parent: parent, size: size, reserved: size}
+	u.touch()
 	if size < 0 {
 		u.reserved = limit
 	}
@@ -127,6 +137,11 @@ func (srv *server) releaseLocked(u *upload) {
 func (srv *server) cancelUpload(u *upload) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	srv.cancelLocked(u)
+}
+
+// cancelLocked throws an unfinished upload away. Hold u.mu.
+func (srv *server) cancelLocked(u *upload) {
 	if u.done {
 		return
 	}
@@ -157,15 +172,18 @@ func (srv *server) receive(w http.ResponseWriter, r *http.Request, u *upload, of
 	room := u.reserved - u.received
 	body := &deadlineReader{r: r.Body, rc: http.NewResponseController(w)}
 	buf := make([]byte, 1<<20)
-	n, copyErr := io.CopyBuffer(struct{ io.Writer }{u.file}, io.LimitReader(body, room+1), buf)
+	n, copyErr := io.CopyBuffer(touchWriter{u}, io.LimitReader(body, room+1), buf)
 	u.received += n
-	u.touched = time.Now()
+	u.touch()
 	if u.received > u.reserved {
 		msg := "The file is larger than it said it would be."
 		if u.size < 0 {
 			msg = "Too large: there isn't enough space left for this file."
 		}
 		return u.received, nil, &httpError{http.StatusRequestEntityTooLarge, msg}
+	}
+	if errors.Is(copyErr, errTooSlow) {
+		return u.received, nil, &httpError{http.StatusRequestTimeout, "The upload was too slow and was stopped."}
 	}
 	if copyErr != nil {
 		return u.received, nil, &httpError{http.StatusBadRequest, "The upload was interrupted."}
@@ -207,20 +225,52 @@ func (srv *server) finishLocked(u *upload) (*Item, error) {
 	return it, nil
 }
 
-// deadlineReader gives up when the sender goes quiet for two minutes, instead of holding the
-// connection forever. Uploads themselves may take as long as they need.
+// touchWriter writes to the upload's file and notes the time, so the janitor can tell a live
+// upload from an abandoned one without waiting for its lock.
+type touchWriter struct{ u *upload }
+
+func (t touchWriter) Write(p []byte) (int, error) {
+	t.u.touch()
+	return t.u.file.Write(p)
+}
+
+const (
+	uploadIdleTimeout = 2 * time.Minute
+	minUploadBytes    = 256 << 10 // per uploadIdleTimeout: about 2 KB/s
+)
+
+var errTooSlow = errors.New("the upload is too slow")
+
+// deadlineReader gives up when the sender goes quiet for two minutes, or sends less than 256 KB
+// in two minutes, instead of holding the connection and the space set aside for the upload
+// forever: a trickle of bytes would otherwise keep both for as long as it liked. Uploads at any
+// normal speed may take as long as they need.
 type deadlineReader struct {
-	r    io.Reader
-	rc   *http.ResponseController
-	last time.Time
+	r           io.Reader
+	rc          *http.ResponseController
+	last        time.Time // when the read deadline was last moved
+	windowStart time.Time
+	windowBytes int64
 }
 
 func (d *deadlineReader) Read(p []byte) (int, error) {
-	if now := time.Now(); now.Sub(d.last) > 5*time.Second {
-		d.rc.SetReadDeadline(now.Add(2 * time.Minute))
+	now := time.Now()
+	if d.windowStart.IsZero() {
+		d.windowStart = now
+	}
+	if now.Sub(d.last) > 5*time.Second {
+		d.rc.SetReadDeadline(now.Add(uploadIdleTimeout))
 		d.last = now
 	}
-	return d.r.Read(p)
+	if now.Sub(d.windowStart) >= uploadIdleTimeout {
+		if d.windowBytes < minUploadBytes {
+			return 0, errTooSlow
+		}
+		d.windowStart, d.windowBytes = now, 0
+	}
+	n, err := d.r.Read(p)
+	d.windowBytes += int64(n)
+	return n, err
 }
 
 /* ---------- Chunked uploads from a browser ---------- */

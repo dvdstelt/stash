@@ -345,7 +345,11 @@ func (srv *server) janitor(ctx context.Context) {
 		}
 		srv.st.mu.Unlock()
 		for _, u := range stale {
-			srv.cancelUpload(u)
+			// A chunk that is still arriving holds the lock; that upload isn't stale, so skip it.
+			if u.mu.TryLock() {
+				srv.cancelLocked(u)
+				u.mu.Unlock()
+			}
 		}
 	}
 }
