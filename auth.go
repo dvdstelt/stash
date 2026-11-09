@@ -307,8 +307,11 @@ func (srv *server) checkProxy(r *http.Request) {
 	}
 }
 
+// isHTTPS says whether cookies may be marked Secure. A public URL that starts with https means
+// the owner serves Stash over HTTPS, whatever the proxy says or forgets to say; browsers still
+// accept Secure cookies from http://localhost for development.
 func (srv *server) isHTTPS(r *http.Request) bool {
-	if r.TLS != nil {
+	if r.TLS != nil || strings.HasPrefix(srv.cfg.PublicURL, "https://") {
 		return true
 	}
 	return srv.trusted(remoteAddr(r)) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
