@@ -226,6 +226,16 @@ func (st *store) linkByID(id string) *Link {
 	return nil
 }
 
+// linkByFolder finds the upload link whose files land in folder, if any.
+func (st *store) linkByFolder(folder string) *Link {
+	for _, l := range st.links {
+		if l.Folder == folder {
+			return l
+		}
+	}
+	return nil
+}
+
 func (st *store) shareByToken(token string) *Share {
 	for _, s := range st.shares {
 		if tokenEqual(s.Token, token) {

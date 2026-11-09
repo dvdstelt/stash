@@ -30,7 +30,7 @@ async function loadInfo() {
   files = (info.files ?? []).map((f) => ({
     ...f,
     type: 'file',
-    src: preview && PREVIEWABLE.has(kindOf(f.name)) ? fileUrl(f) : undefined,
+    src: preview && !f.noPreview && PREVIEWABLE.has(kindOf(f.name)) ? fileUrl(f) : undefined,
     text: !preview && kindOf(f.name) === 'text' ? 'This share has a download limit, so there is no preview. Download the file to see it.' : undefined,
   }));
   render();

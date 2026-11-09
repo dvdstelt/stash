@@ -8,6 +8,8 @@ collect files from other people and send files to them, without anyone seeing mo
 - **Upload links.** Need a file from someone? Send them an upload link. They can add files, but they
   can't see anything else. Every link has its own size limit: 25 MB for a few photos, 500 GB for a
   database backup. You can also limit the number of files, set an expiry date and add a password.
+  A PDF received this way is downloaded rather than opened in the browser, whose PDF viewer runs
+  outside the safeguards Stash puts on other previews.
 - **Share links.** Want to send someone files? Pick them and send a share link. They can view and
   download only those files, one by one or all at once. Share links can expire, stop after a number
   of downloads (every file viewed or downloaded counts, so a limited share shows no previews), and

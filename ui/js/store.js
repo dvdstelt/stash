@@ -22,7 +22,9 @@ function ingest(state) {
   const previous = items;
   items = new Map(state.items.map((it) => {
     if (it.type === 'file') {
-      if (PREVIEWABLE.has(kindOf(it.name))) it.src = contentUrl(it.id);
+      // A PDF that came through an upload link is sent as a download, so there is nothing to show inline.
+      const downloadOnly = kindOf(it.name) === 'pdf' && state.links.some((l) => l.folder === it.parent);
+      if (PREVIEWABLE.has(kindOf(it.name)) && !downloadOnly) it.src = contentUrl(it.id);
       const before = previous.get(it.id);
       if (before?.text !== undefined) it.text = before.text; // keep text previews already fetched
     }

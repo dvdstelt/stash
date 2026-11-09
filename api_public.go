@@ -219,14 +219,15 @@ func (srv *server) handlePublicShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type file struct {
-		ID       string `json:"id"`
-		Name     string `json:"name"`
-		Size     int64  `json:"size"`
-		Modified int64  `json:"modified"`
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Size      int64  `json:"size"`
+		Modified  int64  `json:"modified"`
+		NoPreview bool   `json:"noPreview,omitempty"` // sent as a download whatever its kind
 	}
 	files := []file{}
 	for _, it := range srv.shareFiles(&s) {
-		files = append(files, file{it.ID, it.Name, it.Size, it.Modified})
+		files = append(files, file{it.ID, it.Name, it.Size, it.Modified, srv.downloadOnly(&it)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": status, "name": s.Name, "message": s.Message, "expires": s.Expires, "files": files, "password": s.PasswordHash != "",

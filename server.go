@@ -331,6 +331,9 @@ func (srv *server) serveFile(w http.ResponseWriter, r *http.Request, it *Item, d
 
 	h := w.Header()
 	ctype, inline := inlineTypes[strings.ToLower(filepath.Ext(it.Name))]
+	if srv.downloadOnly(it) {
+		inline = false
+	}
 	disposition := "inline"
 	if download || !inline {
 		ctype, disposition = "application/octet-stream", "attachment"
@@ -344,6 +347,18 @@ func (srv *server) serveFile(w http.ResponseWriter, r *http.Request, it *Item, d
 		h.Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'self'")
 	}
 	http.ServeContent(w, r, "", time.UnixMilli(it.Modified), f)
+}
+
+// downloadOnly says whether a file is always sent as a download, even though its kind could
+// open in the browser. That goes for PDFs received through an upload link: the browser's PDF
+// viewer runs outside the sandbox the other inline files get, and the sender is a stranger.
+func (srv *server) downloadOnly(it *Item) bool {
+	if strings.ToLower(filepath.Ext(it.Name)) != ".pdf" {
+		return false
+	}
+	srv.st.mu.Lock()
+	defer srv.st.mu.Unlock()
+	return srv.st.linkByFolder(it.Parent) != nil
 }
 
 /* ---------- Housekeeping ---------- */
