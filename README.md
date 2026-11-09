@@ -238,8 +238,11 @@ Pass them with `-e NAME=value` in the `podman run` command, or put them in a fil
 ## For developers
 
 See the [technical guide](docs/technical.md) for how Stash works and how to build it, and
-[AGENTS.md](AGENTS.md) for the rules coding agents follow in this project.
+[AGENTS.md](AGENTS.md) for the rules coding agents follow in this project. Contributions are welcome.
 
 ## License
 
-See [LICENSE](LICENSE).
+Stash is open source under the [Apache License 2.0](LICENSE). You may use, change and share it, also
+commercially and in your own fork, as long as you keep the copyright notice and the
+[NOTICE](NOTICE) file and mark the files you changed. Contributions are accepted under the same
+license.
