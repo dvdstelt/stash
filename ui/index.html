@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stash</title>
+  <link rel="stylesheet" href="/css/app.css">
+  <script src="/js/theme.js"></script>
+  <script src="/js/ui.js" defer></script>
+  <script src="/js/api.js" defer></script>
+  <script src="/js/store.js" defer></script>
+  <script src="/js/app.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" aria-label="Main">
+      <a class="brand" href="#/files" data-action="nav"><span class="brand-mark"><span data-icon="briefcase"></span></span>Stash</a>
+      <nav class="nav">
+        <a href="#/files" data-section="files" data-action="nav"><span data-icon="folder"></span>Files</a>
+        <a href="#/upload-links" data-section="upload-links" data-action="nav"><span data-icon="inbox"></span>Upload links<span class="count" id="count-upload"></span></a>
+        <a href="#/share-links" data-section="share-links" data-action="nav"><span data-icon="link"></span>Share links<span class="count" id="count-share"></span></a>
+      </nav>
+      <div class="storage" id="storage"></div>
+    </aside>
+    <div class="scrim" data-action="menu"></div>
+
+    <div class="main">
+      <header class="topbar">
+        <button type="button" class="icon-btn btn-ghost menu-btn" data-action="menu" aria-label="Open menu"><span data-icon="menu"></span></button>
+        <label class="search">
+          <span data-icon="search"></span>
+          <input id="search" type="search" placeholder="Search files" aria-label="Search files" autocomplete="off">
+          <kbd>/</kbd>
+        </label>
+        <span class="spacer"></span>
+        <button type="button" class="icon-btn btn-ghost" data-action="theme" aria-label="Switch light or dark mode" title="Switch light or dark mode"><span data-icon="contrast"></span></button>
+        <button type="button" class="icon-btn btn-ghost" data-action="logout" aria-label="Sign out" title="Sign out"><span data-icon="logout"></span></button>
+      </header>
+      <main class="view" id="view"></main>
+    </div>
+  </div>
+
+  <aside class="tray" id="tray" aria-label="Uploads" hidden></aside>
+  <dialog class="modal" id="modal"></dialog>
+  <div class="drop-hint" aria-hidden="true"></div>
+</body>
+</html>
