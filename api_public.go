@@ -192,7 +192,7 @@ func (srv *server) handleSharePage(w http.ResponseWriter, r *http.Request) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n\nDownload everything as one zip file:\n  curl -L -o %s.zip %s/all.zip\n\nOr one file at a time:\n", s.Name, slugify(s.Name), base)
 	for _, it := range srv.shareFiles(&s) {
-		fmt.Fprintf(&b, "  %s (%s)\n    curl -L -o %q '%s/files/%s?download'\n", it.Name, formatBytes(it.Size), it.Name, base, it.ID)
+		fmt.Fprintf(&b, "  %s (%s)\n    curl -L -o %s '%s/files/%s?download'\n", it.Name, formatBytes(it.Size), shellQuote(it.Name), base, it.ID)
 	}
 	textResponse(w, http.StatusOK, b.String())
 }
@@ -355,4 +355,11 @@ func slugify(s string) string {
 		return "files"
 	}
 	return slug
+}
+
+// shellQuote makes a file name safe to paste into a bash or zsh command. Inside single quotes
+// nothing is expanded, so a name like $(something) stays a name. Control characters can't
+// occur: cleanName took them out.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
