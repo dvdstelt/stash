@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,7 +28,8 @@ type server struct {
 	ui         fs.FS
 	sessions   *sessions
 	limits     *limiter
-	setupToken string // set while no owner password exists; guarded by st.mu
+	setupToken string    // set while no owner password exists; guarded by st.mu
+	proxyNote  sync.Once // warns once about a reverse proxy that isn't trusted
 
 	// Uploads in progress, and the space set aside for them. Guarded by st.mu.
 	uploads  map[string]*upload
@@ -124,16 +126,17 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("GET /s/{token}/files/{id}", srv.handleShareFile)
 	mux.HandleFunc("GET /s/{token}/all.zip", srv.handleShareZip)
 
-	return baseHeaders(mux)
+	return srv.baseHeaders(mux)
 }
 
 // baseHeaders applies to every response. Links carry secret tokens in their URL, so the
 // Referer header must never pass them on to another site.
-func baseHeaders(next http.Handler) http.Handler {
+func (srv *server) baseHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
+		srv.checkProxy(r)
 		next.ServeHTTP(w, r)
 	})
 }

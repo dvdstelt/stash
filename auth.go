@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/netip"
@@ -275,6 +276,22 @@ func (srv *server) clientIP(r *http.Request) netip.Addr {
 		addr = hop
 	}
 	return addr
+}
+
+// checkProxy warns, once, when requests come through a reverse proxy that isn't in
+// -trusted-proxies. Stash then sees every visitor as the proxy's address, so one person's
+// wrong passwords lock everyone out, the owner included.
+func (srv *server) checkProxy(r *http.Request) {
+	if r.Header.Get("X-Forwarded-For") == "" {
+		return
+	}
+	if addr := remoteAddr(r); !srv.trusted(addr) {
+		srv.proxyNote.Do(func() {
+			log.Printf("Requests arrive through %s with an X-Forwarded-For header, but that address isn't in -trusted-proxies. "+
+				"Stash ignores the header and sees everyone behind it as one visitor, so one person's wrong passwords lock "+
+				"everyone out. If it's your reverse proxy, add it: -trusted-proxies %s or STASH_TRUSTED_PROXIES=%s", addr, addr, addr)
+		})
+	}
 }
 
 func (srv *server) isHTTPS(r *http.Request) bool {
