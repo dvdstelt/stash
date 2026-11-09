@@ -70,6 +70,8 @@ once.
   you can keep working while they upload.
 - Click **New folder** to make a folder.
 - Click a file to see it, download it, share it or delete it.
+- Every file and folder has a **⋯** button with everything you can do with it. Right-clicking a
+  file or folder shows the same menu.
 - Use the search box at the top to find files. Pressing `/` jumps to it.
 
 ### Asking someone for files: upload links

@@ -32,6 +32,7 @@ function route() {
 }
 
 function render() {
+  closeMenu();
   const { section, id } = route();
   let content;
   if (state.query) content = searchView();
@@ -195,9 +196,11 @@ function tile(it, selectable = true) {
     ${isFile && selectable ? html`<input type="checkbox" class="check" data-action="select" data-id="${it.id}" ${sel ? raw('checked') : ''} aria-label="Select ${it.name}">` : ''}
     ${store.requestForFolder(it.id) ? html`<span class="tile-flag" title="Upload link folder">${icon('inbox', 'xs')}</span>` : ''}
     <div class="thumb">${thumb(it)}</div>
-    <div class="tile-body"><div class="tile-name" title="${it.name}">${it.name}</div><div class="tile-meta">${itemMeta(it)}</div></div>
+    <div class="tile-body"><div class="min0"><div class="tile-name" title="${it.name}">${it.name}</div><div class="tile-meta">${itemMeta(it)}</div></div>${moreButton(it)}</div>
   </div>`;
 }
+
+const moreButton = (it) => html`<button type="button" class="icon-btn btn-ghost more" data-action="item-menu" data-id="${it.id}" aria-haspopup="menu" aria-expanded="false" aria-label="Actions for ${it.name}" title="More actions">${icon('more')}</button>`;
 
 function itemMeta(it) {
   if (it.type === 'file') return `${bytes(it.size)} · ${rel(it.modified)}`;
@@ -206,14 +209,15 @@ function itemMeta(it) {
 
 function listView(items, { selectable = true, showPath = false } = {}) {
   return html`<div class="table rows-files${selectable ? '' : ' no-select'}">
-    <div class="row head">${selectable ? html`<span></span>` : ''}<span>Name</span><span>Size</span><span>Modified</span></div>
+    <div class="row head">${selectable ? html`<span></span>` : ''}<span>Name</span><span>Size</span><span class="col-date">Modified</span><span></span></div>
     ${items.map((it) => {
       const sel = state.selected.has(it.id);
       return html`<div class="row link${sel ? ' selected' : ''}" role="button" tabindex="0" data-action="open" data-id="${it.id}">
         ${selectable ? html`<span>${it.type === 'file' ? html`<input type="checkbox" data-action="select" data-id="${it.id}" ${sel ? raw('checked') : ''} aria-label="Select ${it.name}">` : ''}</span>` : ''}
         <span class="name-cell"><span class="mini">${thumb(it)}</span><span class="min0 stack"><span class="ellipsis strong">${it.name}</span>${showPath ? html`<span class="ellipsis muted small">${pathText(it.parent)}</span>` : ''}</span></span>
         <span class="muted nowrap">${it.type === 'file' ? bytes(it.size) : bytes(store.size(it.id))}</span>
-        <span class="muted nowrap">${rel(it.modified)}</span>
+        <span class="muted nowrap col-date">${rel(it.modified)}</span>
+        <span>${moreButton(it)}</span>
       </div>`;
     })}
   </div>`;
@@ -289,6 +293,57 @@ function folderForm() {
     </div>
     <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button type="submit" class="btn btn-primary">Create folder</button></div>
   </form>`, 'narrow');
+}
+
+/* ---------- The menu of a file or folder ---------- */
+
+// Every file and folder has a ⋯ button that opens this menu. Right-clicking one, or pressing the
+// context menu key on it, opens the same menu, so the button is there for people who never think
+// of right-clicking a web page, and for phones and tablets, which can't.
+
+const menuEl = $('#item-menu');
+let menu = null; // { id, trigger } while the menu is open
+
+function itemMenu(it) {
+  const file = it.type === 'file';
+  return html`
+    <button type="button" role="menuitem" data-action="open" data-id="${it.id}">${icon(file ? 'eye' : 'folder')}${file ? 'Preview' : 'Open'}</button>
+    ${file ? html`<a role="menuitem" href="${store.contentUrl(it.id)}?download" download>${icon('download')}Download</a>
+      <button type="button" role="menuitem" data-action="share-files" data-ids="${it.id}">${icon('link')}Create share link…</button>
+      <div role="separator"></div>
+      <button type="button" role="menuitem" class="danger" data-action="delete" data-ids="${it.id}">${icon('trash')}Delete</button>` : ''}`;
+}
+
+const menuItems = () => [...menuEl.querySelectorAll('[role=menuitem]:not(:disabled)')];
+
+/** Opens the menu below its ⋯ button, or at the mouse pointer after a right-click. */
+function openMenu(id, trigger, point = null) {
+  const it = store.item(id);
+  if (!it) return;
+  closeMenu();
+  menuEl.innerHTML = itemMenu(it).s;
+  menuEl.setAttribute('aria-label', `Actions for ${it.name}`);
+  menuEl.hidden = false;
+  const r = trigger.getBoundingClientRect();
+  const { width, height } = menuEl.getBoundingClientRect();
+  let x = point ? point.x : r.right - width;
+  let y = point ? point.y : r.bottom + 4;
+  if (y + height > innerHeight - 8) y = (point ? point.y : r.top - 4) - height;
+  menuEl.style.left = `${Math.max(8, Math.min(x, innerWidth - width - 8))}px`;
+  menuEl.style.top = `${Math.max(8, y)}px`;
+  menu = { id, trigger };
+  if (trigger.hasAttribute('aria-expanded')) trigger.setAttribute('aria-expanded', 'true');
+  menuItems()[0]?.focus();
+}
+
+function closeMenu({ focus = false } = {}) {
+  if (!menu) return;
+  const { trigger } = menu;
+  menu = null;
+  menuEl.hidden = true;
+  menuEl.innerHTML = '';
+  if (trigger.hasAttribute('aria-expanded')) trigger.setAttribute('aria-expanded', 'false');
+  if (focus && trigger.isConnected) trigger.focus();
 }
 
 /* ---------- Uploading your own files ---------- */
@@ -696,6 +751,10 @@ const actions = {
     }
   },
   go: (el) => navigate(el.dataset.href),
+  'item-menu': (el) => {
+    if (menu?.trigger === el) closeMenu();
+    else openMenu(el.dataset.id, el);
+  },
   open: (el) => {
     const it = store.item(el.dataset.id);
     if (!it) return;
@@ -850,6 +909,36 @@ document.addEventListener('keydown', (e) => {
 });
 
 modal.addEventListener('click', (e) => { if (e.target === modal) modal.close(); });
+
+// The menu of a file or folder: right-click opens it, and any click closes it again, after the
+// chosen action ran. The ⋯ buttons open and close it themselves.
+document.addEventListener('contextmenu', (e) => {
+  const el = e.target.closest('#view [data-action="open"][data-id]');
+  if (!el) return;
+  e.preventDefault();
+  // The context menu key fires this too, without a pointer over the item: open it below the item then.
+  const r = el.getBoundingClientRect();
+  const pointer = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+  openMenu(el.dataset.id, el, pointer ? { x: e.clientX, y: e.clientY } : null);
+});
+document.addEventListener('click', (e) => {
+  if (menu && !e.target.closest('[data-action="item-menu"]')) closeMenu();
+});
+menuEl.addEventListener('keydown', (e) => {
+  const items = menuItems();
+  const i = items.indexOf(document.activeElement);
+  const n = items.length;
+  const go = { ArrowDown: (i + 1) % n, ArrowUp: (i - 1 + n) % n, Home: 0, End: n - 1 }[e.key];
+  if (go !== undefined) {
+    e.preventDefault();
+    items[go]?.focus();
+  } else if (e.key === 'Escape' || e.key === 'Tab') {
+    e.preventDefault();
+    closeMenu({ focus: true });
+  }
+});
+window.addEventListener('scroll', () => closeMenu(), { capture: true, passive: true });
+window.addEventListener('resize', () => closeMenu());
 
 // Share form: live file count and filter.
 document.addEventListener('change', (e) => {
