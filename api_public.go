@@ -96,10 +96,18 @@ func (srv *server) unlock(w http.ResponseWriter, r *http.Request, kind, id, hash
 		jsonError(w, http.StatusTooManyRequests, fmt.Sprintf("Too many wrong passwords. Try again in %s.", wait.Round(time.Second)))
 		return
 	}
-	if hash != "" && !checkPassword(hash, in.Password) {
-		srv.limits.fail(key)
-		jsonError(w, http.StatusUnauthorized, "That password isn't right.")
-		return
+	if hash != "" {
+		ok, err := checkPassword(hash, in.Password)
+		if err != nil {
+			status, msg := hashProblem(err, "Couldn't check the password.")
+			jsonError(w, status, msg)
+			return
+		}
+		if !ok {
+			srv.limits.fail(key)
+			jsonError(w, http.StatusUnauthorized, "That password isn't right.")
+			return
+		}
 	}
 	srv.limits.succeed(key)
 	srv.setUnlocked(w, r, kind, id, hash)

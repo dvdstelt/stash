@@ -439,7 +439,13 @@ func (srv *server) passwordOK(w http.ResponseWriter, r *http.Request, kind, id, 
 		consoleError(w, r, http.StatusTooManyRequests, fmt.Sprintf("Too many wrong passwords. Try again in %s.\n", wait.Round(time.Second)))
 		return false
 	}
-	if !checkPassword(hash, given) {
+	ok, err := checkPassword(hash, given)
+	if err != nil {
+		status, msg := hashProblem(err, "Couldn't check the password.")
+		consoleError(w, r, status, msg+"\n")
+		return false
+	}
+	if !ok {
 		srv.limits.fail(key)
 		consoleError(w, r, http.StatusUnauthorized, "That password isn't right.\n")
 		return false

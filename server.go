@@ -201,20 +201,24 @@ func (srv *server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "Use at least 10 characters.")
 		return
 	}
+	// Check the token first: hashing is slow on purpose, and anyone can reach this.
+	srv.st.mu.Lock()
+	status, msg := srv.setupCheck(in.Token)
+	srv.st.mu.Unlock()
+	if status != 0 {
+		jsonError(w, status, msg)
+		return
+	}
 	hash, err := hashPassword(in.Password)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "Couldn't store the password.")
+		status, msg = hashProblem(err, "Couldn't store the password.")
+		jsonError(w, status, msg)
 		return
 	}
 	srv.st.mu.Lock()
-	switch {
-	case srv.st.ownerHash != "":
+	if status, msg = srv.setupCheck(in.Token); status != 0 { // someone else used the link meanwhile
 		srv.st.mu.Unlock()
-		jsonError(w, http.StatusConflict, "A password is already set. Sign in instead.")
-		return
-	case srv.setupToken == "" || !tokenEqual(in.Token, srv.setupToken):
-		srv.st.mu.Unlock()
-		jsonError(w, http.StatusForbidden, "This setup link isn't valid. Use the link Stash printed when it started.")
+		jsonError(w, status, msg)
 		return
 	}
 	srv.st.ownerHash, srv.setupToken = hash, ""
@@ -226,6 +230,17 @@ func (srv *server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	srv.startSession(w, r)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// setupCheck says whether token may set the first password right now. Hold st.mu.
+func (srv *server) setupCheck(token string) (status int, msg string) {
+	switch {
+	case srv.st.ownerHash != "":
+		return http.StatusConflict, "A password is already set. Sign in instead."
+	case srv.setupToken == "" || !tokenEqual(token, srv.setupToken):
+		return http.StatusForbidden, "This setup link isn't valid. Use the link Stash printed when it started."
+	}
+	return 0, ""
 }
 
 func (srv *server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +256,13 @@ func (srv *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	srv.st.mu.Lock()
 	hash := srv.st.ownerHash
 	srv.st.mu.Unlock()
-	if hash == "" || !checkPassword(hash, in.Password) {
+	ok, err := checkPassword(hash, in.Password) // false without hashing while no password is set
+	if err != nil {
+		status, msg := hashProblem(err, "Couldn't check the password.")
+		jsonError(w, status, msg)
+		return
+	}
+	if !ok {
 		srv.limits.fail(key)
 		jsonError(w, http.StatusUnauthorized, "That password isn't right.")
 		return

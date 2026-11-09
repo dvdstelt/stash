@@ -7,10 +7,12 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,7 +23,38 @@ import (
 
 const pbkdf2Iterations = 600_000 // OWASP's recommendation for PBKDF2-HMAC-SHA256
 
+// Hashing a password takes a good part of a second on purpose. Only a few run at once, so a
+// flood of sign-in or unlock attempts can't keep every CPU busy; the rest wait their turn.
+var hashSlots = make(chan struct{}, max(2, runtime.NumCPU()))
+
+var errBusy = errors.New("Stash is busy checking passwords. Try again in a moment.")
+
+// hashSlot waits for a turn to hash a password and returns how to give it back.
+func hashSlot() (release func(), err error) {
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	select {
+	case hashSlots <- struct{}{}:
+		return func() { <-hashSlots }, nil
+	case <-timer.C:
+		return nil, errBusy
+	}
+}
+
+// hashProblem turns an error from hashPassword or checkPassword into an answer for the client.
+func hashProblem(err error, fallback string) (status int, msg string) {
+	if errors.Is(err, errBusy) {
+		return http.StatusServiceUnavailable, err.Error()
+	}
+	return http.StatusInternalServerError, fallback
+}
+
 func hashPassword(password string) (string, error) {
+	release, err := hashSlot()
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	salt := randomBytes(16)
 	key, err := pbkdf2.Key(sha256.New, password, salt, pbkdf2Iterations, 32)
 	if err != nil {
@@ -31,23 +64,30 @@ func hashPassword(password string) (string, error) {
 	return fmt.Sprintf("pbkdf2-sha256$%d$%s$%s", pbkdf2Iterations, enc.EncodeToString(salt), enc.EncodeToString(key)), nil
 }
 
-func checkPassword(encoded, password string) bool {
+// checkPassword says whether password matches the stored hash. The error means it couldn't
+// tell, because too many passwords were being checked at once.
+func checkPassword(encoded, password string) (bool, error) {
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 4 || parts[0] != "pbkdf2-sha256" {
-		return false
+		return false, nil
 	}
 	iterations, err := strconv.Atoi(parts[1])
 	if err != nil || iterations < 1 {
-		return false
+		return false, nil
 	}
 	enc := base64.RawStdEncoding
 	salt, err1 := enc.DecodeString(parts[2])
 	want, err2 := enc.DecodeString(parts[3])
 	if err1 != nil || err2 != nil {
-		return false
+		return false, nil
 	}
+	release, err := hashSlot()
+	if err != nil {
+		return false, err
+	}
+	defer release()
 	got, err := pbkdf2.Key(sha256.New, password, salt, iterations, len(want))
-	return err == nil && subtle.ConstantTimeCompare(got, want) == 1
+	return err == nil && subtle.ConstantTimeCompare(got, want) == 1, nil
 }
 
 func tokenEqual(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
