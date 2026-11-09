@@ -25,7 +25,14 @@ async function loadInfo() {
   } catch (err) {
     info = err.body?.status ? err.body : { status: 'error', error: err.message };
   }
-  files = (info.files ?? []).map((f) => ({ ...f, type: 'file', src: PREVIEWABLE.has(kindOf(f.name)) ? fileUrl(f) : undefined }));
+  // Every view of a file counts as a download, so a share with a download limit shows no previews.
+  const preview = !info.limited;
+  files = (info.files ?? []).map((f) => ({
+    ...f,
+    type: 'file',
+    src: preview && PREVIEWABLE.has(kindOf(f.name)) ? fileUrl(f) : undefined,
+    text: !preview && kindOf(f.name) === 'text' ? 'This share has a download limit, so there is no preview. Download the file to see it.' : undefined,
+  }));
   render();
 }
 

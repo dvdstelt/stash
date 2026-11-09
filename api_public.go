@@ -185,18 +185,7 @@ func (srv *server) handleSharePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s, status := srv.shareFor(r)
-	switch status {
-	case "gone":
-		textResponse(w, http.StatusNotFound, "This share link doesn't work. Ask the person who sent it for a new one.\n")
-		return
-	case "expired":
-		textResponse(w, http.StatusGone, "This share link has expired.\n")
-		return
-	case "full":
-		textResponse(w, http.StatusGone, "These files can't be downloaded anymore: the download limit was reached.\n")
-		return
-	}
-	if !srv.passwordOK(w, r, "share", s.ID, s.PasswordHash) {
+	if shareClosed(w, status) || !srv.passwordOK(w, r, "share", s.ID, s.PasswordHash) {
 		return
 	}
 	base := srv.origin(r) + "/s/" + r.PathValue("token")
@@ -233,6 +222,7 @@ func (srv *server) handlePublicShare(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": status, "name": s.Name, "message": s.Message, "expires": s.Expires, "files": files, "password": s.PasswordHash != "",
+		"limited": s.MaxDownloads > 0, // every file viewed counts as a download, so the page shows no previews
 	})
 }
 
@@ -248,34 +238,53 @@ func (srv *server) handleShareUnlock(w http.ResponseWriter, r *http.Request) {
 // shareDownload checks that a share may be downloaded from, in plain text for terminals.
 func (srv *server) shareDownload(w http.ResponseWriter, r *http.Request) (Share, bool) {
 	s, status := srv.shareFor(r)
-	switch status {
-	case "gone":
-		textResponse(w, http.StatusNotFound, "This share link doesn't work.\n")
-		return s, false
-	case "expired":
-		textResponse(w, http.StatusGone, "This share link has expired.\n")
-		return s, false
-	case "full":
-		textResponse(w, http.StatusGone, "The download limit of this share link was reached.\n")
+	if shareClosed(w, status) {
 		return s, false
 	}
 	return s, srv.passwordOK(w, r, "share", s.ID, s.PasswordHash)
 }
 
-// countDownload adds one to the share's downloads. Resuming a download (a Range request that
-// doesn't start at 0) doesn't count again.
-func (srv *server) countDownload(r *http.Request, id string) {
+// shareClosed answers in plain text when a share link can't be used anymore, and says so.
+func shareClosed(w http.ResponseWriter, status string) bool {
+	switch status {
+	case "gone":
+		textResponse(w, http.StatusNotFound, "This share link doesn't work. Ask the person who sent it for a new one.\n")
+	case "expired":
+		textResponse(w, http.StatusGone, "This share link has expired.\n")
+	case "full":
+		textResponse(w, http.StatusGone, "These files can't be downloaded anymore: the download limit was reached.\n")
+	default:
+		return false
+	}
+	return true
+}
+
+// countDownload adds one to the share's downloads, and says whether the download may go ahead.
+// Every request for a file's contents counts, with or without ?download, so leaving that off
+// doesn't get around the limit; only resuming a download (a Range request that doesn't start at
+// 0) is free. The check and the count happen under one lock, so with several downloads at the
+// same moment only as many get through as the limit allows.
+func (srv *server) countDownload(w http.ResponseWriter, r *http.Request, id string) bool {
 	if rng := r.Header.Get("Range"); rng != "" && !strings.HasPrefix(rng, "bytes=0-") {
-		return
+		return true
 	}
 	srv.st.mu.Lock()
 	defer srv.st.mu.Unlock()
-	if s := srv.st.shareByID(id); s != nil {
-		s.Downloads++
-		if err := srv.st.save(); err != nil {
-			log.Printf("saving metadata: %v", err)
+	s := srv.st.shareByID(id)
+	status := "gone"
+	if s != nil {
+		if status = shareStatus(s); status == "revoked" {
+			status = "gone"
 		}
 	}
+	if shareClosed(w, status) {
+		return false
+	}
+	s.Downloads++
+	if err := srv.st.save(); err != nil {
+		log.Printf("saving metadata: %v", err)
+	}
+	return true
 }
 
 func (srv *server) handleShareFile(w http.ResponseWriter, r *http.Request) {
@@ -286,11 +295,10 @@ func (srv *server) handleShareFile(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	for _, it := range srv.shareFiles(&s) {
 		if it.ID == id {
-			download := r.URL.Query().Has("download")
-			if download {
-				srv.countDownload(r, s.ID)
+			if !srv.countDownload(w, r, s.ID) {
+				return
 			}
-			srv.serveFile(w, r, &it, download)
+			srv.serveFile(w, r, &it, r.URL.Query().Has("download"))
 			return
 		}
 	}
@@ -305,7 +313,9 @@ func (srv *server) handleShareZip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	files := srv.shareFiles(&s)
-	srv.countDownload(r, s.ID)
+	if !srv.countDownload(w, r, s.ID) {
+		return
+	}
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": slugify(s.Name) + ".zip"}))
 	w.Header().Set("Cache-Control", "no-store")

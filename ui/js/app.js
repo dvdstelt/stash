@@ -664,7 +664,7 @@ function shareForm(ids = []) {
       </fieldset>
       <div class="two">
         <div class="field"><label for="s-exp">Expires</label>${expirySelect('s-exp', { fallback: 30 })}</div>
-        <div class="field"><label for="s-max">Max downloads <span class="muted">· optional</span></label><input id="s-max" name="maxDownloads" type="number" min="1" step="1" class="input" placeholder="No limit"></div>
+        <div class="field"><label for="s-max">Max downloads <span class="muted">· optional</span></label><input id="s-max" name="maxDownloads" type="number" min="1" step="1" class="input" placeholder="No limit"><p class="hint">Every file viewed or downloaded counts. A limited share shows no previews.</p></div>
       </div>
       ${passwordField()}
       <div class="field"><label for="s-msg">Message <span class="muted">· optional</span></label><textarea id="s-msg" name="message" class="input" rows="2" maxlength="500" placeholder="Shown above the files"></textarea></div>

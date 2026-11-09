@@ -135,7 +135,7 @@ function previewMedia(it) {
   if (kind === 'pdf' && it.src) return html`<iframe class="pv-frame" src="${it.src}" title="${it.name}"></iframe>`;
   if (kind === 'video' && it.src) return html`<video class="pv-img" src="${it.src}" controls></video>`;
   if (kind === 'text') return html`<pre class="pv-text" data-text-preview>${it.text ?? 'Loading…'}</pre>`;
-  return html`<div class="pv-none"><span class="kind kind-${kind}">${icon(KIND_ICON[kind])}</span><p>No preview for this kind of file.<br>Download it to open it.</p></div>`;
+  return html`<div class="pv-none"><span class="kind kind-${kind}">${icon(KIND_ICON[kind])}</span><p>No preview for this file.<br>Download it to open it.</p></div>`;
 }
 
 /* ---------- Command-line snippets ---------- */
