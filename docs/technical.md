@@ -17,7 +17,8 @@ Stash is a single Go program that uses only the standard library. It serves:
 
 The web pages are plain HTML, CSS and JavaScript without a build step. They are embedded in the
 binary with `go:embed`, so the program is the whole application. The container image is the binary
-on an empty (`scratch`) base, about 8 MB.
+on an empty (`scratch`) base, about 8 MB. Releases are on Docker Hub as `docker.io/dvdstelt/stash`,
+for `linux/amd64`, `linux/arm64` and `linux/arm/v7` (see [Releasing](#releasing)).
 
 ## Data folder
 
@@ -109,7 +110,7 @@ The README shows a minimal Quadlet file. With your own data folder and settings:
 
 ```ini
 [Container]
-Image=localhost/stash
+Image=docker.io/dvdstelt/stash
 ContainerName=stash
 PublishPort=127.0.0.1:8080:8080
 Volume=%h/stash-files:/data:Z
@@ -281,6 +282,16 @@ bin/stash -listen 127.0.0.1:8080 -data data -ui-dir ui
 With `-ui-dir ui`, edits to the pages show on reload without rebuilding. The data folder and `bin/`
 are ignored by git.
 
+### Building the image yourself
+
+```bash
+podman build -t stash .
+```
+
+Then use `localhost/stash` wherever the README says `docker.io/dvdstelt/stash`. The build stage
+runs on your own platform and cross-compiles, so `--platform linux/arm64` (or `linux/arm/v7`)
+builds an image for another machine just as fast, without emulation.
+
 ### Checking changes
 
 Until there are automated tests, check by hand:
@@ -295,3 +306,22 @@ Until there are automated tests, check by hand:
 6. Look at the browser console for errors.
 
 [AGENTS.md](../AGENTS.md) lists the conventions and the security rules changes must keep.
+
+### Releasing
+
+Pushing a version tag publishes the image to Docker Hub:
+
+```bash
+git tag -a v1.2.0 -m "Stash 1.2.0"
+git push origin v1.2.0
+```
+
+The workflow in `.github/workflows/publish-image.yml` builds all three platforms and pushes
+`docker.io/dvdstelt/stash` with the tags `1.2.0`, `1.2`, `1` and `latest`. A `0.x` version gets no
+major-only tag, and a prerelease such as `v1.3.0-rc.1` gets only its own tag, never `latest`. People
+who want to stay on one major version can run `docker.io/dvdstelt/stash:1`.
+
+One-time setup: create a Docker Hub personal access token for the `dvdstelt` account with
+**Read & Write** access, and store it as the repository secret `DOCKERHUB_TOKEN`
+(`gh secret set DOCKERHUB_TOKEN`). The workflow pins each action to a commit; update those on
+purpose, not automatically.
