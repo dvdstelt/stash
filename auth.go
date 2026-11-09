@@ -154,20 +154,25 @@ func (srv *server) signedIn(r *http.Request) bool {
 
 /* ---------- Unlocked password-protected links ---------- */
 
-// unlockValue is the cookie value proving someone entered a link's password. It is tied to the
-// password hash, so changing the password locks everyone out again.
-func (srv *server) unlockValue(kind, id, passwordHash string) string {
+const unlockLifetime = 7 * 24 * time.Hour
+
+// unlockValue is the cookie value proving someone entered a link's password: when it stops
+// being proof, in Unix seconds, and a signature over that time, the link and its password hash.
+// The time is signed so the browser can't stretch it, and the hash so changing the password
+// locks everyone out again.
+func (srv *server) unlockValue(kind, id, passwordHash string, expires int64) string {
 	mac := hmac.New(sha256.New, srv.st.secret)
-	fmt.Fprintf(mac, "%s\x00%s\x00%s", kind, id, passwordHash)
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	fmt.Fprintf(mac, "%s\x00%s\x00%s\x00%d", kind, id, passwordHash, expires)
+	return strconv.FormatInt(expires, 10) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func unlockCookieName(kind, id string) string { return "stash_" + kind + "_" + id }
 
 func (srv *server) setUnlocked(w http.ResponseWriter, r *http.Request, kind, id, passwordHash string) {
+	expires := time.Now().Add(unlockLifetime)
 	http.SetCookie(w, &http.Cookie{
-		Name: unlockCookieName(kind, id), Value: srv.unlockValue(kind, id, passwordHash), Path: "/",
-		MaxAge: int((7 * 24 * time.Hour).Seconds()), HttpOnly: true, Secure: srv.isHTTPS(r), SameSite: http.SameSiteStrictMode,
+		Name: unlockCookieName(kind, id), Value: srv.unlockValue(kind, id, passwordHash, expires.Unix()), Path: "/",
+		Expires: expires, HttpOnly: true, Secure: srv.isHTTPS(r), SameSite: http.SameSiteStrictMode,
 	})
 }
 
@@ -176,7 +181,15 @@ func (srv *server) isUnlocked(r *http.Request, kind, id, passwordHash string) bo
 		return true
 	}
 	c, err := r.Cookie(unlockCookieName(kind, id))
-	return err == nil && hmac.Equal([]byte(c.Value), []byte(srv.unlockValue(kind, id, passwordHash)))
+	if err != nil {
+		return false
+	}
+	expiresText, _, ok := strings.Cut(c.Value, ".")
+	expires, parseErr := strconv.ParseInt(expiresText, 10, 64)
+	if !ok || parseErr != nil || expires <= time.Now().Unix() {
+		return false
+	}
+	return hmac.Equal([]byte(c.Value), []byte(srv.unlockValue(kind, id, passwordHash, expires)))
 }
 
 /* ---------- Slowing down password guessing ---------- */
