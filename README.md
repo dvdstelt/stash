@@ -32,32 +32,17 @@ The commands below use `podman`. With Docker, type `docker` instead; everything 
 
 ## Installing
 
-**1. Download Stash.** If you have `git`:
+**1. Start Stash.** The first time, this downloads Stash from Docker Hub:
 
 ```bash
-git clone https://github.com/dvdstelt/stash.git
-cd stash
-```
-
-Without `git`: on the GitHub page, click **Code**, then **Download ZIP**. Unzip it and open a terminal
-in that folder.
-
-**2. Build Stash.** This takes a minute the first time:
-
-```bash
-podman build -t stash .
-```
-
-**3. Start Stash:**
-
-```bash
-podman run -d --name stash -p 8080:8080 -v stash-data:/data stash
+podman run -d --name stash -p 8080:8080 -v stash-data:/data docker.io/dvdstelt/stash
 ```
 
 Stash now runs on port 8080. It keeps everything in a storage volume called `stash-data`, so your
-files survive restarts and updates.
+files survive restarts and updates. It runs on Intel and AMD computers and on ARM ones, such as a
+Raspberry Pi.
 
-**4. Choose your password.** Show Stash's log:
+**2. Choose your password.** Show Stash's log:
 
 ```bash
 podman logs stash
@@ -139,11 +124,11 @@ podman volume inspect stash-data --format '{{.Mountpoint}}'
 
 ### Keeping them in a folder you choose (Linux)
 
-A folder of your own is easier to back up. Start Stash like this instead of step 3:
+A folder of your own is easier to back up. Start Stash like this instead of step 1:
 
 ```bash
 mkdir -p ~/stash-files
-podman run -d --name stash -p 8080:8080 --userns=keep-id --user "$(id -u):$(id -g)" -v ~/stash-files:/data:Z stash
+podman run -d --name stash -p 8080:8080 --userns=keep-id --user "$(id -u):$(id -g)" -v ~/stash-files:/data:Z docker.io/dvdstelt/stash
 ```
 
 With Docker, leave out `--userns=keep-id`. On Windows and macOS, stick with the volume.
@@ -162,16 +147,18 @@ To save a volume as a single file instead: `podman volume export stash-data --ou
 
 ## Updating
 
-In the folder you downloaded Stash to:
+Download the newest version and remove the running container:
 
 ```bash
-git pull
-podman build -t stash .
+podman pull docker.io/dvdstelt/stash
 podman rm -f stash
 ```
 
 Then start it again with the same `podman run` command you used before. Your files and links stay
 where they are.
+
+If Stash starts automatically with Podman (see below), run `podman pull docker.io/dvdstelt/stash`
+and then `systemctl --user restart stash` instead.
 
 ## Starting Stash automatically
 
@@ -182,7 +169,7 @@ where they are.
 
 ```ini
 [Container]
-Image=localhost/stash
+Image=docker.io/dvdstelt/stash
 ContainerName=stash
 PublishPort=8080:8080
 Volume=stash-data:/data
@@ -218,7 +205,7 @@ Stop Stash, remove the password, and start it again. The log then shows a new se
 
 ```bash
 podman stop stash
-podman run --rm -v stash-data:/data stash reset-password
+podman run --rm -v stash-data:/data docker.io/dvdstelt/stash reset-password
 podman start stash
 podman logs stash
 ```
@@ -240,7 +227,8 @@ Pass them with `-e NAME=value` in the `podman run` command, or put them in a fil
 
 ## For developers
 
-See the [technical guide](docs/technical.md) for how Stash works and how to build it, and
+See the [technical guide](docs/technical.md) for how Stash works, how to build the image yourself and
+how releases reach Docker Hub, and
 [AGENTS.md](AGENTS.md) for the rules coding agents follow in this project. Contributions are welcome.
 
 ## License
