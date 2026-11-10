@@ -1,0 +1,40 @@
+# Checks formatting, runs go vet, and runs the tests with the race detector, for every push to main
+# and every pull request. The same commands are in "Checking changes" in docs/technical.md.
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # The image the build instructions use, so a pass here means a pass on your machine.
+    container: docker.io/library/golang:1.27-alpine
+    env:
+      GOFLAGS: -buildvcs=false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt: $unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: CGO_ENABLED=0 go vet ./...
+
+      # The race detector needs a C compiler.
+      - name: Tests
+        run: |
+          apk add -q gcc musl-dev
+          CGO_ENABLED=1 go test -race ./...

@@ -319,6 +319,8 @@ the race detector too. It needs a C compiler, which this installs in the throwaw
 podman run --rm -v "$PWD":/src:z -w /src -e CGO_ENABLED=1 docker.io/library/golang:1.27-alpine sh -c 'apk add -q gcc musl-dev && go test -race ./...'
 ```
 
+GitHub runs both for every push to `main` and every pull request (`.github/workflows/test.yml`).
+
 Each test starts its own Stash with an empty data folder and uses it over HTTP, the way browsers,
 curl and PowerShell do. `helpers_test.go` has the helpers: `newEnv` starts a Stash with the owner
 signed in; `upload`, `put` (an upload like `curl -T`), `createLink` and `createShare` set things
