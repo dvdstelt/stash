@@ -16,14 +16,20 @@ Linux. That's a core feature, not an extra.
 Go doesn't have to be installed; use the official image:
 
 ```bash
-podman run --rm -v "$PWD":/src:z -w /src -e CGO_ENABLED=0 docker.io/library/golang:1.27-alpine sh -c 'gofmt -l . ; go vet ./... && go build -o bin/stash .'
+podman run --rm -v "$PWD":/src:z -w /src -e CGO_ENABLED=0 docker.io/library/golang:1.27-alpine sh -c 'gofmt -l . ; go vet ./... && go test ./... && go build -o bin/stash .'
 ```
 
-- `gofmt -l .` must print nothing, and `go vet ./...` must pass.
+- `gofmt -l .` must print nothing, and `go vet ./...` and `go test ./...` must pass. When a change
+  touches locking or uploads, also run the tests with the race detector (see "Checking changes" in
+  `docs/technical.md`).
+- Every change comes with tests. Each test starts its own Stash with `newEnv` from
+  `helpers_test.go` and uses it over HTTP, as browsers, curl and PowerShell do. Check what people
+  get back: the status and the text of the reply. Send command-line uploads the way those tools
+  do, not only the way the pages do.
+- The tests don't cover the page scripts. After changing those, check them in a browser, following
+  "Checking changes" in `docs/technical.md`.
 - Run with `bin/stash -listen 127.0.0.1:8080 -data data -ui-dir ui`. The log prints a setup link
   for the first password. `-ui-dir` serves the pages from disk, so page edits need only a reload.
-- There are no automated tests yet. Check changes by hand, following "Checking changes" in
-  `docs/technical.md`. Test command-line uploads with real `curl -T` commands, not only the pages.
 - Build the container with `podman build -t stash .`. Never run `podman volume prune` or
   `podman system prune`: they delete the user's other volumes and images too.
 

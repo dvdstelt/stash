@@ -260,7 +260,7 @@ Resuming doesn't count either, from the browser that started the download (see
 - Resuming a share download from the command line (`curl -C -` without a cookie jar) counts as a
   new download, and so does resuming after Stash restarts.
 - Folders can't be renamed, moved or deleted yet. Deleting files works.
-- There are no automated tests yet. See [Checking changes](#checking-changes).
+- The tests cover the server, not the page scripts. See [Checking changes](#checking-changes).
 
 ## Development
 
@@ -275,6 +275,7 @@ Resuming doesn't count either, from the browser that started the download (see
 | `uploads.go` | Space reservations, chunked and command-line uploads |
 | `api_owner.go`, `api_public.go` | The owner's interface, and the link and share pages |
 | `disk_*.go` | Free disk space, per operating system |
+| `*_test.go` | Tests, with the shared helpers in `helpers_test.go` |
 | `ui/` | The pages: `index.html` (owner), `upload.html`, `share.html`, `login.html`, with `js/` and `css/` |
 
 The page scripts are classic scripts, not modules, sharing a few globals: `StashUI` (`ui.js`:
@@ -305,17 +306,32 @@ builds an image for another machine just as fast, without emulation.
 
 ### Checking changes
 
-Until there are automated tests, check by hand:
+Run the checks and the tests:
 
-1. `gofmt -l .` prints nothing, and `go vet ./...` passes.
-2. Start with an empty data folder, set the password with the printed link, and sign in.
-3. Upload several files at once in the browser, including one larger than 32 MB.
-4. Create an upload link with a small limit and a password. Upload through its page, and with
-   `curl -T` with and without `-H "Link-Password: …"`. Check that an oversized file is refused with
-   a clear message.
-5. Create a share link and download one file and the zip. With a download limit of 1, check that
-   `curl -I` doesn't use it up, and that a `Range` header doesn't get around it.
-6. Look at the browser console for errors.
+```bash
+podman run --rm -v "$PWD":/src:z -w /src -e CGO_ENABLED=0 docker.io/library/golang:1.27-alpine sh -c 'gofmt -l . ; go vet ./... && go test ./...'
+```
+
+`gofmt -l .` must print nothing. So much depends on `st.mu` that it's worth running the tests with
+the race detector too. It needs a C compiler, which this installs in the throwaway container:
+
+```bash
+podman run --rm -v "$PWD":/src:z -w /src -e CGO_ENABLED=1 docker.io/library/golang:1.27-alpine sh -c 'apk add -q gcc musl-dev && go test -race ./...'
+```
+
+Each test starts its own Stash with an empty data folder and uses it over HTTP, the way browsers,
+curl and PowerShell do. `helpers_test.go` has the helpers: `newEnv` starts a Stash with the owner
+signed in; `upload`, `put` (an upload like `curl -T`), `createLink` and `createShare` set things
+up; `changeLink` and `changeShare` do what the pages can't, such as letting a link expire right
+now. Passwords set that way use `fastHash`, which keeps the tests quick.
+
+The tests don't cover the page scripts. After changing those, check by hand:
+
+1. Start with an empty data folder, set the password with the printed link, and sign in.
+2. Upload several files at once in the browser, including one larger than 32 MB.
+3. Create an upload link with a small limit and a password, and upload through its page.
+4. Create a share link, open it, and download one file and the zip.
+5. Look at the browser console for errors.
 
 [AGENTS.md](../AGENTS.md) lists the conventions and the security rules changes must keep.
 
