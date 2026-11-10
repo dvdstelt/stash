@@ -91,7 +91,7 @@ func (srv *server) unlock(w http.ResponseWriter, r *http.Request, kind, id, hash
 	if !readJSON(w, r, &in) {
 		return
 	}
-	key := kind + ":" + id + "|" + srv.clientIP(r).String()
+	key := kind + ":" + id + "|" + srv.visitor(r)
 	if wait := srv.limits.wait(key); wait > 0 {
 		jsonError(w, http.StatusTooManyRequests, fmt.Sprintf("Too many wrong passwords. Try again in %s.", wait.Round(time.Second)))
 		return

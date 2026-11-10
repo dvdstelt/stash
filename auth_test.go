@@ -325,6 +325,88 @@ func TestLoginSlowsDownGuessing(t *testing.T) {
 	wantBody(t, r, "Too many attempts")
 }
 
+func TestVisitor(t *testing.T) {
+	t.Parallel()
+	srv := &server{cfg: config{TrustedProxies: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}}}
+	tests := []struct {
+		remote string
+		xff    string
+		want   string
+	}{
+		{"198.51.100.7:1", "", "198.51.100.7"},
+		{"[2001:db8:1:2::5]:1", "", "2001:db8:1:2::/64"},
+		{"[2001:db8:1:2:ffff:ffff:ffff:ffff]:1", "", "2001:db8:1:2::/64"},
+		{"[2001:db8:1:3::5]:1", "", "2001:db8:1:3::/64"},
+		{"[::ffff:198.51.100.7]:1", "", "198.51.100.7"},
+		{"[fe80::1%eth0]:1", "", "fe80::/64"},
+		{"10.0.0.1:1", "2001:db8:9:9:1:2:3:4", "2001:db8:9:9::/64"},
+		{"10.0.0.1:1", "203.0.113.9", "203.0.113.9"},
+	}
+	for _, tt := range tests {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = tt.remote
+		if tt.xff != "" {
+			r.Header.Set("X-Forwarded-For", tt.xff)
+		}
+		if got := srv.visitor(r); got != tt.want {
+			t.Errorf("visitor(%s, X-Forwarded-For %q) = %s; want %s", tt.remote, tt.xff, got, tt.want)
+		}
+	}
+}
+
+// An IPv6 connection comes with billions of addresses. Taking a new one doesn't reset the count,
+// for signing in, for unlocking a link's page, or for a password on the command line.
+func TestGuessingLimitCoversAnIPv6Network(t *testing.T) {
+	t.Parallel()
+	e := newEnvWith(t, config{TrustedProxies: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}})
+	l := e.createLink(nil)
+	e.changeLink(l.ID, func(l *Link) { l.PasswordHash = fastHash(ownerPassword) })
+	guessers := map[string]func(password, from string) reply{
+		"signing in": func(password, from string) reply {
+			return e.sendJSON(newTerminal(), http.MethodPost, "/api/login", map[string]string{"password": password}, "X-Forwarded-For", from)
+		},
+		"unlocking a link": func(password, from string) reply {
+			return e.sendJSON(newTerminal(), http.MethodPost, "/api/public/d/"+l.Token+"/unlock", map[string]string{"password": password}, "X-Forwarded-For", from)
+		},
+		"Link-Password": func(password, from string) reply {
+			return e.put(l.Token, "a.txt", strings.NewReader("a"), "Link-Password", password, "X-Forwarded-For", from)
+		},
+	}
+	// Each guesser gets its own networks: the page and the command line share one count per link.
+	n := 0
+	for name, guess := range guessers {
+		n++
+		for i := 1; i <= 5; i++ {
+			if r := guess("guess", fmt.Sprintf("2001:db8:%d:2::%x", n, i)); r.status != http.StatusUnauthorized {
+				t.Fatalf("%s: guess %d got %d", name, i, r.status)
+			}
+		}
+		if r := guess(ownerPassword, fmt.Sprintf("2001:db8:%d:2:aaaa:bbbb:cccc:dddd", n)); r.status != http.StatusTooManyRequests {
+			t.Errorf("%s: a new address in the same /64 got %d; want 429", name, r.status)
+		}
+		if r := guess(ownerPassword, fmt.Sprintf("2001:db8:%d:3::1", n)); r.status == http.StatusTooManyRequests || r.status == http.StatusUnauthorized {
+			t.Errorf("%s: another /64 got %d; it shouldn't be held up", name, r.status)
+		}
+	}
+}
+
+// Guessing on the link's page and on the command line counts towards the same limit, so switching
+// between them gains nothing.
+func TestLinkPageAndCommandLineShareTheLimit(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	l := e.createLink(nil)
+	e.changeLink(l.ID, func(l *Link) { l.PasswordHash = fastHash("open sesame") })
+	for i := 0; i < 3; i++ {
+		e.expect(e.put(l.Token, "a.txt", strings.NewReader("a"), "Link-Password", "guess"), http.StatusUnauthorized)
+	}
+	for i := 0; i < 2; i++ {
+		e.expect(e.sendJSON(newBrowser(), http.MethodPost, "/api/public/d/"+l.Token+"/unlock", map[string]string{"password": "guess"}), http.StatusUnauthorized)
+	}
+	e.expect(e.put(l.Token, "a.txt", strings.NewReader("a"), "Link-Password", "open sesame"), http.StatusTooManyRequests)
+	e.expect(e.sendJSON(newBrowser(), http.MethodPost, "/api/public/d/"+l.Token+"/unlock", map[string]string{"password": "open sesame"}), http.StatusTooManyRequests)
+}
+
 // Without -trusted-proxies, X-Forwarded-For is whatever the client wants it to be. Believing it
 // would give every guess a fresh address and no limit at all.
 func TestGuessingLimitIgnoresForgedForwardedFor(t *testing.T) {

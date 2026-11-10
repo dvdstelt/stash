@@ -194,7 +194,7 @@ func (srv *server) isUnlocked(r *http.Request, kind, id, passwordHash string) bo
 
 /* ---------- Slowing down password guessing ---------- */
 
-// limiter slows down repeated wrong passwords per client and target: after 5 failures,
+// limiter slows down repeated wrong passwords per visitor and target: after 5 failures,
 // each further attempt has to wait twice as long as the last, up to 15 minutes.
 type limiter struct {
 	mu    sync.Mutex
@@ -289,6 +289,19 @@ func (srv *server) clientIP(r *http.Request) netip.Addr {
 		addr = hop
 	}
 	return addr
+}
+
+// visitor names who is guessing, for the password limits. An IPv6 connection comes with a whole
+// /64 of addresses, so all of those count as one visitor. Otherwise an attacker could take a new
+// address for every few guesses and never be slowed down.
+func (srv *server) visitor(r *http.Request) string {
+	addr := srv.clientIP(r)
+	if addr.Is6() {
+		if network, err := addr.Prefix(64); err == nil {
+			return network.String()
+		}
+	}
+	return addr.String()
 }
 
 // checkProxy warns, once, when requests come through a reverse proxy that isn't in

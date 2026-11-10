@@ -434,7 +434,7 @@ func (srv *server) passwordOK(w http.ResponseWriter, r *http.Request, kind, id, 
 			"  PowerShell: -Headers @{ 'Link-Password' = 'YOUR-PASSWORD' }\n")
 		return false
 	}
-	key := kind + ":" + id + "|" + srv.clientIP(r).String()
+	key := kind + ":" + id + "|" + srv.visitor(r)
 	if wait := srv.limits.wait(key); wait > 0 {
 		consoleError(w, r, http.StatusTooManyRequests, fmt.Sprintf("Too many wrong passwords. Try again in %s.\n", wait.Round(time.Second)))
 		return false

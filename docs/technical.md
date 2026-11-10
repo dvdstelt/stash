@@ -150,9 +150,14 @@ reachable only through the reverse proxy on the same machine.
   A `Range` header alone proves nothing, because anyone can send one.
 
 **Guessing.**
-- Wrong passwords are counted per visitor address and target.
+- Wrong passwords are counted per visitor and target. A link's page and the command line count
+  towards the same limit.
+- A visitor is one IPv4 address, or one IPv6 /64 network. An IPv6 connection comes with a whole /64,
+  so taking a new address from it doesn't reset the count.
 - After 5 failures, each further attempt has to wait twice as long as the one before, up to 15
   minutes.
+- Nothing locks out everyone at once, so a stranger's guesses never keep the owner out. The flip
+  side: someone with many addresses, such as a botnet or a larger IPv6 network, gets more guesses.
 
 **Uploaded files.**
 - Files are stored under random IDs. Names are cleaned: only the last path element, no control
