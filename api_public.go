@@ -271,8 +271,8 @@ func shareClosed(w http.ResponseWriter, status string) bool {
 // countDownload adds one to the share's downloads, and says whether the download may go ahead.
 // Every request for a file's contents counts, with or without ?download, so leaving that off
 // doesn't get around the limit; only resuming a download (a Range request that doesn't start at
-// 0) is free. The check and the count happen under one lock, so with several downloads at the
-// same moment only as many get through as the limit allows.
+// 0) is free, and so is HEAD, which sends no contents. The check and the count happen under one
+// lock, so with several downloads at the same moment only as many get through as the limit allows.
 func (srv *server) countDownload(w http.ResponseWriter, r *http.Request, id string) bool {
 	if rng := r.Header.Get("Range"); rng != "" && !strings.HasPrefix(rng, "bytes=0-") {
 		return true
@@ -288,6 +288,9 @@ func (srv *server) countDownload(w http.ResponseWriter, r *http.Request, id stri
 	}
 	if shareClosed(w, status) {
 		return false
+	}
+	if r.Method == http.MethodHead {
+		return true
 	}
 	s.Downloads++
 	if err := srv.st.save(); err != nil {
@@ -328,6 +331,9 @@ func (srv *server) handleShareZip(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": slugify(s.Name) + ".zip"}))
 	w.Header().Set("Cache-Control", "no-store")
+	if r.Method == http.MethodHead {
+		return
+	}
 
 	zw := zip.NewWriter(w)
 	used := map[string]bool{}

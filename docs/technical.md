@@ -242,6 +242,9 @@ and `maxDownloads` instead of `quota` and `maxFiles`.
 | `GET /s/<token>/files/<id>` | One file. Add `?download` to download it, which counts towards the download limit. |
 | `GET /s/<token>/all.zip` | All files as one zip, stored uncompressed. Counts as one download. |
 
+`HEAD` on a file or the zip doesn't count as a download, because it sends no contents. Checking a
+link with `curl -I`, or a link scanner in a mail app doing so, doesn't use up a share's downloads.
+
 ## Limits and known gaps
 
 - One owner. There are no user accounts.
