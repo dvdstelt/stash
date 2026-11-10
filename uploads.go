@@ -446,7 +446,7 @@ func (srv *server) passwordOK(w http.ResponseWriter, r *http.Request, kind, id, 
 		return false
 	}
 	if !ok {
-		srv.limits.fail(key)
+		srv.wrongPassword(r, key, kind, id)
 		consoleError(w, r, http.StatusUnauthorized, "That password isn't right.\n")
 		return false
 	}

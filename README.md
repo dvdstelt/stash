@@ -200,6 +200,11 @@ At first, links only work on your own network. To let anyone on the internet use
 
 The [technical guide](docs/technical.md) shows how to set this up.
 
+Once Stash is on the internet, strangers may try to guess your password. After 5 wrong tries, Stash
+makes each next try wait longer. It also writes every wrong password to its log with the address it
+came from, so `podman logs stash` shows you when it happens. The technical guide shows how to block
+those addresses automatically with fail2ban.
+
 ## Forgot your password?
 
 Stop Stash, remove the password, and start it again. The log then shows a new setup link:

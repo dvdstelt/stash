@@ -104,7 +104,7 @@ func (srv *server) unlock(w http.ResponseWriter, r *http.Request, kind, id, hash
 			return
 		}
 		if !ok {
-			srv.limits.fail(key)
+			srv.wrongPassword(r, key, kind, id)
 			jsonError(w, http.StatusUnauthorized, "That password isn't right.")
 			return
 		}

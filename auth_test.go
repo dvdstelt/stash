@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -556,13 +557,106 @@ func TestOriginAndHTTPS(t *testing.T) {
 	}
 }
 
+// captureLog collects what Stash logs during a test. Tests that use it can't run in parallel.
+func captureLog(t *testing.T) *lockedBuffer {
+	buf := &lockedBuffer{}
+	log.SetOutput(buf)
+	t.Cleanup(func() { log.SetOutput(io.Discard) })
+	return buf
+}
+
+var logLine = regexp.MustCompile(`^\d{4}/\d\d/\d\d \d\d:\d\d:\d\d (.*)$`)
+
+// logLines returns the logged messages without their date and time.
+func logLines(t *testing.T, buf *lockedBuffer) []string {
+	t.Helper()
+	var out []string
+	for _, line := range strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		m := logLine.FindStringSubmatch(line)
+		if m == nil {
+			t.Fatalf("log line without a date and time: %q", line)
+		}
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// Every wrong password is logged with the visitor's address, so the owner can see someone
+// guessing, and fail2ban can block them. The filter in docs/technical.md depends on this format.
+// Not parallel: it captures the log.
+func TestWrongPasswordsAreLogged(t *testing.T) {
+	e := newEnvWith(t, config{TrustedProxies: []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}})
+	buf := captureLog(t) // after the start, which logs a setup link
+	a := e.upload(rootID, "a.txt", []byte("a"))
+	l := e.createLink(map[string]any{"name": "Tax papers"})
+	e.changeLink(l.ID, func(l *Link) { l.PasswordHash = fastHash("open sesame") })
+	s := e.createShare(map[string]any{"name": "Holiday"}, a)
+	e.changeShare(s.ID, func(s *Share) { s.PasswordHash = fastHash("swordfish") })
+	guess := map[string]string{"password": "hunter2-guess"}
+
+	e.expect(e.sendJSON(newTerminal(), http.MethodPost, "/api/login", guess, "X-Forwarded-For", "203.0.113.9"), http.StatusUnauthorized)
+	e.expect(e.sendJSON(newTerminal(), http.MethodPost, "/api/public/d/"+l.Token+"/unlock", guess, "X-Forwarded-For", "2001:db8::7"), http.StatusUnauthorized)
+	e.expect(e.put(l.Token, "a.txt", strings.NewReader("a"), "Link-Password", "hunter2-guess", "X-Forwarded-For", "198.51.100.4"), http.StatusUnauthorized)
+	e.expect(e.get(e.fileURL(s, a), "Link-Password", "hunter2-guess", "X-Forwarded-For", "198.51.100.5"), http.StatusUnauthorized)
+	e.expect(e.sendJSON(newTerminal(), http.MethodPost, "/api/public/s/"+s.Token+"/unlock", guess, "X-Forwarded-For", "198.51.100.6"), http.StatusUnauthorized)
+
+	want := []string{
+		"Wrong password from 203.0.113.9 for signing in.",
+		`Wrong password from 2001:db8::7 for upload link "Tax papers".`,
+		`Wrong password from 198.51.100.4 for upload link "Tax papers".`,
+		`Wrong password from 198.51.100.5 for share link "Holiday".`,
+		`Wrong password from 198.51.100.6 for share link "Holiday".`,
+	}
+	got := logLines(t, buf)
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("logged:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if strings.Contains(buf.String(), "hunter2") {
+		t.Error("a password went into the log")
+	}
+
+	// Right passwords, and requests that don't send one, aren't logged.
+	buf.Reset()
+	e.expect(e.sendJSON(newTerminal(), http.MethodPost, "/api/login", map[string]string{"password": ownerPassword}, "X-Forwarded-For", "203.0.113.9"), http.StatusNoContent)
+	e.expect(e.put(l.Token, "b.txt", strings.NewReader("b"), "Link-Password", "open sesame"), http.StatusOK)
+	e.expect(e.put(l.Token, "c.txt", strings.NewReader("c")), http.StatusUnauthorized)
+	if logged := buf.String(); logged != "" {
+		t.Errorf("logged %q", logged)
+	}
+}
+
+// Attempts turned away while a visitor has to wait cost Stash nothing, and aren't logged either,
+// so nobody can fill the log with them. Not parallel: it captures the log.
+func TestBlockedGuessesDontFillTheLog(t *testing.T) {
+	e := newEnv(t)
+	buf := captureLog(t) // after the start, which logs a setup link
+	for i := 0; i < 5; i++ {
+		e.expect(e.sendJSON(newTerminal(), http.MethodPost, "/api/login", map[string]string{"password": "guess"}), http.StatusUnauthorized)
+	}
+	for i := 0; i < 20; i++ {
+		e.expect(e.sendJSON(newTerminal(), http.MethodPost, "/api/login", map[string]string{"password": "guess"}), http.StatusTooManyRequests)
+	}
+	lines := logLines(t, buf)
+	if len(lines) != 5 {
+		t.Fatalf("logged %d lines; want 5:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+	for _, line := range lines[:4] {
+		if line != "Wrong password from 127.0.0.1 for signing in." {
+			t.Errorf("logged %q", line)
+		}
+	}
+	if lines[4] != "Wrong password from 127.0.0.1 for signing in. Further tries from there wait 1s." {
+		t.Errorf("the fifth line is %q; want it to say there's a wait now", lines[4])
+	}
+}
+
 // Stash warns once about a reverse proxy it doesn't trust, so the owner can fix the setting.
 // Not parallel: it captures the log.
 func TestUntrustedProxyWarning(t *testing.T) {
-	var buf lockedBuffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(io.Discard)
-
+	buf := captureLog(t)
 	e := newEnv(t)
 	for i := 0; i < 3; i++ {
 		e.expect(e.get("/api/session", "X-Forwarded-For", "203.0.113.9"), http.StatusOK)

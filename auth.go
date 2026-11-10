@@ -216,7 +216,8 @@ func (l *limiter) wait(key string) time.Duration {
 	return 0
 }
 
-func (l *limiter) fail(key string) {
+// fail counts a wrong password, and returns how long the next attempt has to wait, if at all.
+func (l *limiter) fail(key string) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	f := l.fails[key]
@@ -226,16 +227,45 @@ func (l *limiter) fail(key string) {
 	}
 	f.count++
 	f.last = time.Now()
-	if f.count >= 5 {
-		delay := time.Second << min(f.count-5, 10)
-		f.until = time.Now().Add(min(delay, 15*time.Minute))
+	if f.count < 5 {
+		return 0
 	}
+	delay := min(time.Second<<min(f.count-5, 10), 15*time.Minute)
+	f.until = time.Now().Add(delay)
+	return delay
 }
 
 func (l *limiter) succeed(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.fails, key)
+}
+
+// wrongPassword counts a wrong password for the owner's sign-in (kind "login") or a link, and logs
+// it with the visitor's address. That way the owner sees someone guessing, and tools like fail2ban
+// can block them. The address comes before the link's name, so a filter finds it first. Attempts
+// turned away while a visitor has to wait aren't logged: they cost nothing, and would let anyone
+// fill the log.
+func (srv *server) wrongPassword(r *http.Request, key, kind, id string) {
+	wait := srv.limits.fail(key)
+	target := "signing in"
+	srv.st.mu.Lock()
+	switch kind {
+	case "link":
+		if l := srv.st.linkByID(id); l != nil {
+			target = fmt.Sprintf("upload link %q", l.Name)
+		}
+	case "share":
+		if s := srv.st.shareByID(id); s != nil {
+			target = fmt.Sprintf("share link %q", s.Name)
+		}
+	}
+	srv.st.mu.Unlock()
+	msg := fmt.Sprintf("Wrong password from %s for %s.", srv.clientIP(r), target)
+	if wait > 0 {
+		msg += fmt.Sprintf(" Further tries from there wait %s.", wait.Round(time.Second))
+	}
+	log.Print(msg)
 }
 
 func (l *limiter) prune() {

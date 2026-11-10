@@ -271,7 +271,7 @@ func (srv *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		srv.limits.fail(key)
+		srv.wrongPassword(r, key, "login", "")
 		jsonError(w, http.StatusUnauthorized, "That password isn't right.")
 		return
 	}

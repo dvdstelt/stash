@@ -126,6 +126,53 @@ WantedBy=default.target
 Set `User` and `Group` to the output of `id -u` and `id -g`. Publishing on `127.0.0.1` keeps Stash
 reachable only through the reverse proxy on the same machine.
 
+### Blocking password guessers with fail2ban
+
+Stash logs every wrong password with the visitor's address, never the password itself:
+
+```
+2026/11/10 14:03:07 Wrong password from 203.0.113.9 for signing in.
+2026/11/10 14:03:09 Wrong password from 198.51.100.4 for upload link "Tax papers". Further tries from there wait 1s.
+```
+
+Stash already slows each visitor down. [fail2ban](https://github.com/fail2ban/fail2ban) can go further
+and block an address at the firewall. Set `STASH_TRUSTED_PROXIES` first: without it, the log shows
+your reverse proxy's address for every visitor, and fail2ban would block the proxy.
+
+The filter, in `/etc/fail2ban/filter.d/stash.conf`:
+
+```ini
+[Definition]
+failregex = Wrong password from <HOST> for
+```
+
+The jail, in `/etc/fail2ban/jail.d/stash.local`. It reads Stash's log from the journal, where Podman
+sends it on most Linux systems:
+
+```ini
+[stash]
+enabled = true
+filter = stash
+# journalflags=1 also reads users' journals, where rootless containers log.
+backend = systemd[journalflags=1]
+journalmatch = CONTAINER_NAME=stash
+port = http,https
+maxretry = 10
+findtime = 1h
+bantime = 1d
+```
+
+`CONTAINER_NAME` is the container's name: `stash` in the README's commands and in the Quadlet file
+above. Check that the lines are there with `journalctl --user CONTAINER_NAME=stash` (leave out
+`--user` for a container that runs as root), then load the jail with `sudo fail2ban-client reload`.
+
+Some limits to know:
+
+- fail2ban blocks at the firewall of the machine it runs on. That works when visitors reach a
+  reverse proxy on that machine, as above. A container port published straight to the internet may
+  bypass the rules fail2ban adds.
+- fail2ban blocks single addresses. Stash's own limit counts a whole IPv6 /64 as one visitor.
+
 ## Security model
 
 **The owner.**
@@ -158,6 +205,9 @@ reachable only through the reverse proxy on the same machine.
   minutes.
 - Nothing locks out everyone at once, so a stranger's guesses never keep the owner out. The flip
   side: someone with many addresses, such as a botnet or a larger IPv6 network, gets more guesses.
+- Every wrong password is logged with the visitor's address and what it was for, so the owner can
+  see guessing and block it with [fail2ban](#blocking-password-guessers-with-fail2ban). Attempts
+  turned away during a wait aren't logged: they cost nothing, and would let anyone fill the log.
 
 **Uploaded files.**
 - Files are stored under random IDs. Names are cleaned: only the last path element, no control
