@@ -13,7 +13,8 @@ collect files from other people and send files to them, without anyone seeing mo
 - **Share links.** Want to send someone files? Pick them and send a share link. They can view and
   download only those files, one by one or all at once. Share links can expire, stop after a number
   of downloads (every file viewed or downloaded counts, so a limited share shows no previews), and
-  have a password.
+  have a password. A download that breaks off can be resumed in the same browser for a day,
+  without counting again.
 
 The people you send links to don't need an account. They upload from their browser, or, for very
 large files, from the command line on Windows, macOS or Linux.

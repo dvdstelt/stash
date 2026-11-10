@@ -36,6 +36,10 @@ type server struct {
 	reserved map[string]int64 // per upload link: bytes set aside
 	pending  map[string]int   // per upload link: files in progress
 	inflight int64            // all uploads together: bytes set aside
+
+	// When each counted share download stops being resumable for free, keyed by resumeKey.
+	// Guarded by st.mu.
+	resumes map[string]time.Time
 }
 
 func newServer(cfg config) (*server, error) {
@@ -65,6 +69,7 @@ func newServer(cfg config) (*server, error) {
 		uploads:  map[string]*upload{},
 		reserved: map[string]int64{},
 		pending:  map[string]int{},
+		resumes:  map[string]time.Time{},
 	}
 	if st.ownerHash == "" {
 		srv.setupToken = newID()
@@ -376,6 +381,11 @@ func (srv *server) janitor(ctx context.Context) {
 		srv.sessions.prune()
 		srv.limits.prune()
 		srv.st.mu.Lock()
+		for key, until := range srv.resumes { // downloads that can't be resumed for free anymore
+			if time.Now().After(until) {
+				delete(srv.resumes, key)
+			}
+		}
 		var stale []*upload
 		for _, u := range srv.uploads {
 			if time.Since(u.lastActive()) > 24*time.Hour {

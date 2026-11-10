@@ -144,6 +144,10 @@ reachable only through the reverse proxy on the same machine.
   password hash. Changing the password locks everyone out again.
 - The command line sends the password in a `Link-Password` header on every request.
 - Until the password is entered, a link reveals only its name and whether it expired.
+- A share's download limit counts every request for a file's contents, and every zip. Resuming is
+  free only for the browser that was counted: it gets a random ID in a `stash_downloader` cookie,
+  and for 24 hours its `Range` requests for that file are free, also after the limit is reached.
+  A `Range` header alone proves nothing, because anyone can send one.
 
 **Guessing.**
 - Wrong passwords are counted per visitor address and target.
@@ -239,11 +243,13 @@ and `maxDownloads` instead of `quota` and `maxFiles`.
 | `GET /s/<token>` | The share page, or download commands for a terminal |
 | `GET /api/public/s/<token>` | Status and file list, or `locked` |
 | `POST /api/public/s/<token>/unlock` | `{password}` |
-| `GET /s/<token>/files/<id>` | One file. Add `?download` to download it, which counts towards the download limit. |
+| `GET /s/<token>/files/<id>` | One file. Add `?download` to download it instead of opening it. Counts as one download. |
 | `GET /s/<token>/all.zip` | All files as one zip, stored uncompressed. Counts as one download. |
 
 `HEAD` on a file or the zip doesn't count as a download, because it sends no contents. Checking a
 link with `curl -I`, or a link scanner in a mail app doing so, doesn't use up a share's downloads.
+Resuming doesn't count either, from the browser that started the download (see
+[Security model](#security-model)).
 
 ## Limits and known gaps
 
@@ -251,6 +257,8 @@ link with `curl -I`, or a link scanner in a mail app doing so, doesn't use up a 
 - The owner's pages load all metadata at once, which is fine for tens of thousands of files.
 - Thumbnails are the original images.
 - Uploads can't continue after Stash restarts.
+- Resuming a share download from the command line (`curl -C -` without a cookie jar) counts as a
+  new download, and so does resuming after Stash restarts.
 - Folders can't be renamed, moved or deleted yet. Deleting files works.
 - There are no automated tests yet. See [Checking changes](#checking-changes).
 
@@ -305,7 +313,8 @@ Until there are automated tests, check by hand:
 4. Create an upload link with a small limit and a password. Upload through its page, and with
    `curl -T` with and without `-H "Link-Password: …"`. Check that an oversized file is refused with
    a clear message.
-5. Create a share link and download one file and the zip.
+5. Create a share link and download one file and the zip. With a download limit of 1, check that
+   `curl -I` doesn't use it up, and that a `Range` header doesn't get around it.
 6. Look at the browser console for errors.
 
 [AGENTS.md](../AGENTS.md) lists the conventions and the security rules changes must keep.

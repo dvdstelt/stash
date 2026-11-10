@@ -244,10 +244,11 @@ func (srv *server) handleShareUnlock(w http.ResponseWriter, r *http.Request) {
 	srv.unlock(w, r, "share", s.ID, s.PasswordHash)
 }
 
-// shareDownload checks that a share may be downloaded from, in plain text for terminals.
+// shareDownload checks that a share may be downloaded from, in plain text for terminals. A share
+// that reached its download limit gets through, so countDownload can let a resume finish.
 func (srv *server) shareDownload(w http.ResponseWriter, r *http.Request) (Share, bool) {
 	s, status := srv.shareFor(r)
-	if shareClosed(w, status) {
+	if status != "full" && shareClosed(w, status) {
 		return s, false
 	}
 	return s, srv.passwordOK(w, r, "share", s.ID, s.PasswordHash)
@@ -268,25 +269,45 @@ func shareClosed(w http.ResponseWriter, status string) bool {
 	return true
 }
 
+const (
+	downloaderCookie = "stash_downloader"
+	resumeWindow     = 24 * time.Hour
+)
+
+// resumeKey names one browser's download of one file of a share, or of its zip ("all.zip").
+func resumeKey(shareID, file, downloader string) string {
+	return shareID + "\x00" + file + "\x00" + downloader
+}
+
 // countDownload adds one to the share's downloads, and says whether the download may go ahead.
 // Every request for a file's contents counts, with or without ?download, so leaving that off
-// doesn't get around the limit; only resuming a download (a Range request that doesn't start at
-// 0) is free, and so is HEAD, which sends no contents. The check and the count happen under one
-// lock, so with several downloads at the same moment only as many get through as the limit allows.
-func (srv *server) countDownload(w http.ResponseWriter, r *http.Request, id string) bool {
-	if rng := r.Header.Get("Range"); rng != "" && !strings.HasPrefix(rng, "bytes=0-") {
-		return true
-	}
+// doesn't get around the limit. HEAD is free, because it sends no contents. Resuming is free too,
+// but only for a browser that was counted for this file in the last day, even if the limit was
+// reached since. A Range header on its own proves nothing: anyone can send one. Browsers are told
+// apart by a random ID in a cookie, handed out with their first counted download.
+// The check and the count happen under one lock, so with several downloads at the same moment
+// only as many get through as the limit allows.
+func (srv *server) countDownload(w http.ResponseWriter, r *http.Request, shareID, file string) bool {
 	srv.st.mu.Lock()
 	defer srv.st.mu.Unlock()
-	s := srv.st.shareByID(id)
+	s := srv.st.shareByID(shareID)
 	status := "gone"
 	if s != nil {
 		if status = shareStatus(s); status == "revoked" {
 			status = "gone"
 		}
 	}
-	if shareClosed(w, status) {
+	if status != "full" && shareClosed(w, status) {
+		return false
+	}
+	downloader := ""
+	if c, err := r.Cookie(downloaderCookie); err == nil && len(c.Value) <= 64 {
+		downloader = c.Value
+	}
+	if r.Header.Get("Range") != "" && downloader != "" && time.Now().Before(srv.resumes[resumeKey(shareID, file, downloader)]) {
+		return true
+	}
+	if shareClosed(w, status) { // the download limit was reached
 		return false
 	}
 	if r.Method == http.MethodHead {
@@ -296,6 +317,16 @@ func (srv *server) countDownload(w http.ResponseWriter, r *http.Request, id stri
 	if err := srv.st.save(); err != nil {
 		log.Printf("saving metadata: %v", err)
 	}
+	if downloader == "" {
+		downloader = newID()
+	}
+	// Lax rather than Strict: the ID proves nothing, and a resume may start from the browser's
+	// list of downloads rather than from this site.
+	http.SetCookie(w, &http.Cookie{
+		Name: downloaderCookie, Value: downloader, Path: "/s/" + r.PathValue("token") + "/",
+		MaxAge: int(resumeWindow / time.Second), HttpOnly: true, Secure: srv.isHTTPS(r), SameSite: http.SameSiteLaxMode,
+	})
+	srv.resumes[resumeKey(shareID, file, downloader)] = time.Now().Add(resumeWindow)
 	return true
 }
 
@@ -307,7 +338,7 @@ func (srv *server) handleShareFile(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	for _, it := range srv.shareFiles(&s) {
 		if it.ID == id {
-			if !srv.countDownload(w, r, s.ID) {
+			if !srv.countDownload(w, r, s.ID, it.ID) {
 				return
 			}
 			srv.serveFile(w, r, &it, r.URL.Query().Has("download"))
@@ -325,7 +356,7 @@ func (srv *server) handleShareZip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	files := srv.shareFiles(&s)
-	if !srv.countDownload(w, r, s.ID) {
+	if !srv.countDownload(w, r, s.ID, "all.zip") {
 		return
 	}
 	w.Header().Set("Content-Type", "application/zip")
