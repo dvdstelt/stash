@@ -846,7 +846,7 @@ function shareForm(ids = []) {
       </div>
       <fieldset class="field picker">
         <legend>Files <span class="muted" data-pick-count>${pickLabel(chosen.size, total(all.filter((f) => chosen.has(f.id))))}</span></legend>
-        <input type="search" class="input" placeholder="Filter files" data-filter="pick" aria-label="Filter files">
+        <div class="input-icon">${icon('search')}<input type="search" class="input" placeholder="Filter files" data-filter="pick" aria-label="Filter files"></div>
         <div class="pick-list">${list.map((f) => html`<label class="pick" data-name="${f.name.toLowerCase()}">
           <input type="checkbox" name="files" value="${f.id}" ${chosen.has(f.id) ? raw('checked') : ''}>
           <span class="mini">${thumb(f)}</span>

@@ -326,6 +326,9 @@ select.input { padding-right: 8px; }
 .input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .input::placeholder { color: var(--muted); opacity: .8; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.input-icon { position: relative; }
+.input-icon > .icon { position: absolute; top: 50%; left: 12px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.input-icon > .input { padding-left: 38px; }
 .custom-quota { display: flex; gap: 8px; margin-top: 8px; }
 .custom-quota select { flex: none; width: 90px; }
 .check-row { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
