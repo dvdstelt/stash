@@ -73,6 +73,10 @@ once.
   folders are left out.
 - Click **New folder** to make a folder.
 - Click a file to see it, download it, share it or delete it.
+- Tick files to share or delete several at once. To tick every file in a folder, press Ctrl+A
+  (Cmd+A on a Mac), tick the box at the top of the list, or click **Select all** in the bar that
+  appears once you tick a file. Files in the folders inside aren't ticked. In search results, it
+  ticks every file found.
 - Every file and folder has a **⋯** button with everything you can do with it. Right-clicking a
   file or folder shows the same menu.
 - Deleting a file or folder moves it to the **Trash**. You can restore it from there for 30 days;

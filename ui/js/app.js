@@ -41,6 +41,8 @@ function render() {
   else if (section === 'trash') content = trashView();
   else content = filesView(id ?? 'root');
   viewEl.innerHTML = content.s;
+  // A checkbox is only half ticked as a property, not with an HTML attribute.
+  viewEl.querySelectorAll('[data-indeterminate]').forEach((el) => { el.indeterminate = true; });
   renderSidebar(state.query ? null : section);
 }
 
@@ -228,7 +230,7 @@ function itemMeta(it) {
 
 function listView(items, { selectable = true, showPath = false } = {}) {
   return html`<div class="table rows-files${selectable ? '' : ' no-select'}">
-    <div class="row head">${selectable ? html`<span></span>` : ''}<span>Name</span><span>Size</span><span class="col-date">Modified</span><span></span></div>
+    <div class="row head">${selectable ? html`<span>${selectAllBox(items)}</span>` : ''}<span>Name</span><span>Size</span><span class="col-date">Modified</span><span></span></div>
     ${items.map((it) => {
       const sel = state.selected.has(it.id);
       return html`<div class="row link${sel ? ' selected' : ''}" role="button" tabindex="0" data-action="open" data-id="${it.id}">
@@ -242,12 +244,47 @@ function listView(items, { selectable = true, showPath = false } = {}) {
   </div>`;
 }
 
+/* ---------- Selecting files ---------- */
+
+// Only files have a checkbox. Selecting all ticks the files in the folder on screen, not what's in
+// its subfolders, or every file a search found.
+
+/** The files that can be ticked in the view on screen. */
+function selectableFiles() {
+  if (state.query) return store.search(state.query).filter((it) => it.type === 'file');
+  const { section, id = 'root' } = route();
+  const folder = store.item(id);
+  if (section !== 'files' || folder?.type !== 'folder' || store.inTrash(id)) return [];
+  return store.children(id).filter((it) => it.type === 'file');
+}
+
+function selectAll(on = true) {
+  for (const f of selectableFiles()) {
+    if (on) state.selected.add(f.id);
+    else state.selected.delete(f.id);
+  }
+  render();
+}
+
+/** The checkbox in a list's header row: ticked when all its files are, half when some are. */
+function selectAllBox(items) {
+  const files = items.filter((it) => it.type === 'file');
+  if (!files.length) return '';
+  const ticked = files.filter((it) => state.selected.has(it.id)).length;
+  return html`<input type="checkbox" data-action="select-all" ${ticked === files.length ? raw('checked') : ''} ${ticked && ticked < files.length ? raw('data-indeterminate') : ''} aria-label="Select all files" title="Select all files">`;
+}
+
 function selectionBar() {
   const n = state.selected.size;
   if (!n) return '';
   const size = total([...state.selected].map((id) => store.item(id)).filter(Boolean));
+  // The grid has no header row with a checkbox, so the bar offers to tick the rest.
+  const files = selectableFiles();
+  const more = files.some((it) => !state.selected.has(it.id));
   return html`<div class="selbar">
-    <strong>${n} selected</strong><span class="muted">${bytes(size)}</span><span class="spacer"></span>
+    <strong>${n} selected</strong><span class="muted">${bytes(size)}</span>
+    ${more ? html`<button type="button" class="btn btn-sm btn-ghost" data-action="select-all">Select all ${files.length}</button>` : ''}
+    <span class="spacer"></span>
     <button type="button" class="btn btn-sm" data-action="share-selected">${icon('link')} Create share link</button>
     <button type="button" class="btn btn-sm btn-ghost btn-danger" data-action="delete-selected">${icon('trash')} Delete</button>
     <button type="button" class="icon-btn btn-ghost" data-action="clear-selection" aria-label="Clear selection" title="Clear selection">${icon('x')}</button>
@@ -949,6 +986,8 @@ const actions = {
     else state.selected.delete(el.dataset.id);
     render();
   },
+  // The header checkbox ticks or unticks everything; the button in the selection bar only ticks.
+  'select-all': (el) => selectAll(el.type === 'checkbox' ? el.checked : true),
   'clear-selection': () => { state.selected.clear(); render(); },
   layout: (el) => { state.layout = el.dataset.layout; save('layout', state.layout); render(); },
   'remove-upload': (el) => {
@@ -1117,6 +1156,12 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '/' && !modal.open && !e.target.closest('input, textarea, select')) {
     e.preventDefault();
     searchInput.focus();
+  }
+  // Ctrl+A or Cmd+A ticks every file on screen. In a text field it selects the text, as always.
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a' && !modal.open
+    && !e.target.closest('textarea, select, input:not([type="checkbox"])') && selectableFiles().length) {
+    e.preventDefault();
+    selectAll();
   }
 });
 
