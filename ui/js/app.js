@@ -2,7 +2,7 @@
 
 const {
   html, raw, b, icon, bytes, rel, date, kindOf, thumb, previewMedia,
-  snippetTabs, uploadSnippets, shareSnippets, toast, delegate, hydrateIcons,
+  snippetTabs, uploadSnippets, shareSnippets, toast, copy, delegate, hydrateIcons,
   uploadRow, updateUploadRow, dropZone, slug, qrSvg, downloadQr,
 } = window.StashUI;
 const { store, uploadUrl, shareUrl, MB, GB, TB } = window.StashData;
@@ -137,10 +137,12 @@ function confirmModal({ title, body, confirm, onConfirm }) {
 function linkPanel(url, name, snippets, previewHref) {
   return html`<div class="link-panel">
     <div class="linkbox">
-      <input class="input mono" readonly value="${url}" aria-label="Link" data-action="select-text">
+      <div class="link-field">
+        <input class="input mono" readonly value="${url}" aria-label="Link, click to copy" title="Click to copy" data-action="copy-link">
+        <button type="button" class="icon-btn btn-ghost" data-action="copy-link" aria-label="Copy link" title="Copy link">${icon('copy')}</button>
+      </div>
       <div class="linkbox-actions">
-        <button type="button" class="btn" data-action="copy" data-text="${url}" data-msg="Link copied">${icon('copy')} Copy link</button>
-        <button type="button" class="btn btn-ghost" data-action="toggle-qr" aria-expanded="false" title="Show the link as a QR code, to open it on a phone or print it">${icon('qr')} QR code</button>
+        <button type="button" class="btn" data-action="toggle-qr" aria-expanded="false" title="Show the link as a QR code, to open it on a phone or print it">${icon('qr')}<span data-qr-label>Show QR code</span>${icon('chevron-down', 'chev')}</button>
         <a class="btn btn-ghost" href="${previewHref}" target="_blank" rel="noopener" title="Open the page the recipient sees">${icon('external')} Preview</a>
       </div>
     </div>
@@ -846,7 +848,7 @@ function shareForm(ids = []) {
       </div>
       <fieldset class="field picker">
         <legend>Files <span class="muted" data-pick-count>${pickLabel(chosen.size, total(all.filter((f) => chosen.has(f.id))))}</span></legend>
-        <input type="search" class="input" placeholder="Filter files" data-filter="pick" aria-label="Filter files">
+        <div class="input-icon">${icon('search')}<input type="search" class="input" placeholder="Filter files" data-filter="pick" aria-label="Filter files"></div>
         <div class="pick-list">${list.map((f) => html`<label class="pick" data-name="${f.name.toLowerCase()}">
           <input type="checkbox" name="files" value="${f.id}" ${chosen.has(f.id) ? raw('checked') : ''}>
           <span class="mini">${thumb(f)}</span>
@@ -926,10 +928,16 @@ const actions = {
   delete: (el) => confirmDelete(el.dataset.ids.split(',')),
   'delete-selected': () => confirmDelete([...state.selected]),
   'close-modal': () => modal.close(),
+  // A click anywhere on the link copies it, and selects it to show what was copied.
+  'copy-link': (el) => {
+    const input = el.closest('.link-field').querySelector('input');
+    copy(input.value, 'Link copied').then(() => input.select());
+  },
   'toggle-qr': (el) => {
     const panel = el.closest('.link-panel').querySelector('[data-qr]');
     panel.hidden = !panel.hidden;
     el.setAttribute('aria-expanded', b(!panel.hidden));
+    el.querySelector('[data-qr-label]').textContent = panel.hidden ? 'Show QR code' : 'Hide QR code';
   },
   'download-qr': (el) => downloadQr(el.dataset.url, `${slug(el.dataset.name)}-qr-code.png`),
   confirm: () => {

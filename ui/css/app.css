@@ -316,7 +316,8 @@ legend { padding: 0; }
 
 /* ---------- Forms ---------- */
 
-.field { display: grid; gap: 6px; }
+/* align-content: start keeps a field next to a taller one (with a hint) from spreading out. */
+.field { display: grid; gap: 6px; align-content: start; }
 .field > label, .field > legend { font-size: 13px; font-weight: 600; }
 .field > legend { margin-bottom: 6px; }
 .input { width: 100%; height: 38px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); transition: border-color .12s, box-shadow .12s; }
@@ -325,6 +326,9 @@ select.input { padding-right: 8px; }
 .input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .input::placeholder { color: var(--muted); opacity: .8; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.input-icon { position: relative; }
+.input-icon > .icon { position: absolute; top: 50%; left: 12px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.input-icon > .input { padding-left: 38px; }
 .custom-quota { display: flex; gap: 8px; margin-top: 8px; }
 .custom-quota select { flex: none; width: 90px; }
 .check-row { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
@@ -379,14 +383,22 @@ dialog.modal > form { display: flex; flex: 1; flex-direction: column; min-height
 /* minmax(0, 1fr): a long command scrolls in its box instead of widening the panel and its dialog. */
 .link-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .linkbox { display: flex; flex-wrap: wrap; gap: 8px; }
-.linkbox .input { flex: 1 1 260px; min-width: 0; font-size: 13px; }
+.link-field { position: relative; flex: 1 1 260px; min-width: 0; }
+.link-field .input { padding-right: 44px; font-size: 13px; cursor: pointer; }
+.link-field .input:hover { border-color: var(--accent); }
+.link-field .icon-btn { position: absolute; top: 2px; right: 2px; }
 .linkbox-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .linkbox .btn[aria-expanded="true"] { background: var(--surface-2); }
+.btn .chev { margin-right: -3px; color: var(--muted); transition: transform .15s; }
+.btn[aria-expanded="true"] .chev { transform: rotate(180deg); }
 /* The code stays dark on white in the dark theme too: not every phone reads a light-on-dark code. */
 .qr-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
 .qr { display: block; width: 200px; height: 200px; flex: none; border-radius: 6px; }
 .qr-text { display: grid; flex: 1 1 220px; gap: 8px; justify-items: start; }
 .qr-text p { margin: 0; }
+/* minmax(0, 1fr): a long command scrolls in its box, wherever the commands are shown, instead of
+   making the page wider than a phone screen. */
+.snippets { display: grid; grid-template-columns: minmax(0, 1fr); }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
 .tab { margin-bottom: -1px; padding: 7px 10px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-size: 13px; font-weight: 600; }
 .tab:hover { color: var(--text); }
