@@ -366,6 +366,10 @@ The page scripts are classic scripts, not modules, sharing a few globals: `Stash
 templating, icons, formatting, shared components), `StashAPI` (`api.js`: requests and chunked
 uploads) and `StashData` (`store.js`: the owner's data).
 
+The QR codes for links are made in the page by a small encoder in `ui.js`: byte mode, error
+correction level M, versions 1 to 40, and the mask with the lowest penalty. No link goes to a QR
+service. A link of about 50 characters becomes a version 4 code.
+
 ### Building and running
 
 You don't need Go installed; the official Go image works:
@@ -417,9 +421,10 @@ The tests don't cover the page scripts. After changing those, check by hand:
 2. Upload several files at once in the browser, including one larger than 32 MB.
 3. Create an upload link with a small limit and a password, and upload through its page.
 4. Create a share link, open it, and download one file and the zip.
-5. Delete a shared file and a folder from their menu. Check that the share page leaves the file
+5. Show a link's QR code, scan it with a phone, and download the image.
+6. Delete a shared file and a folder from their menu. Check that the share page leaves the file
    out, restore both from the Trash, and empty the trash.
-6. Look at the browser console for errors.
+7. Look at the browser console for errors.
 
 [AGENTS.md](../AGENTS.md) lists the conventions and the security rules changes must keep.
 
