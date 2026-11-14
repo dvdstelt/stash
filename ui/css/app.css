@@ -316,7 +316,8 @@ legend { padding: 0; }
 
 /* ---------- Forms ---------- */
 
-.field { display: grid; gap: 6px; }
+/* align-content: start keeps a field next to a taller one (with a hint) from spreading out. */
+.field { display: grid; gap: 6px; align-content: start; }
 .field > label, .field > legend { font-size: 13px; font-weight: 600; }
 .field > legend { margin-bottom: 6px; }
 .input { width: 100%; height: 38px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); transition: border-color .12s, box-shadow .12s; }
