@@ -396,6 +396,9 @@ dialog.modal > form { display: flex; flex: 1; flex-direction: column; min-height
 .qr { display: block; width: 200px; height: 200px; flex: none; border-radius: 6px; }
 .qr-text { display: grid; flex: 1 1 220px; gap: 8px; justify-items: start; }
 .qr-text p { margin: 0; }
+/* minmax(0, 1fr): a long command scrolls in its box, wherever the commands are shown, instead of
+   making the page wider than a phone screen. */
+.snippets { display: grid; grid-template-columns: minmax(0, 1fr); }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
 .tab { margin-bottom: -1px; padding: 7px 10px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font-size: 13px; font-weight: 600; }
 .tab:hover { color: var(--text); }
