@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"crypto/rand"
 	"io"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -97,9 +99,9 @@ type shareInfo struct {
 	Locked   bool
 	Limited  bool
 	Files    []struct {
-		ID, Name  string
-		Size      int64
-		NoPreview bool
+		ID, Name, Path string
+		Size           int64
+		NoPreview      bool
 	}
 }
 
@@ -570,4 +572,162 @@ func TestShareLinksUseThePublicURL(t *testing.T) {
 	s := e.createShare(nil, a)
 	r := e.expect(e.get("/s/"+s.Token), http.StatusOK)
 	wantBody(t, r, "https://files.example.com/s/"+s.Token+"/all.zip")
+}
+
+/* ---------- Sharing a folder ---------- */
+
+// shareFolder creates a share link for a folder and everything in it.
+func (e *testEnv) shareFolder(fields map[string]any, folder Item) shareView {
+	e.t.Helper()
+	if fields == nil {
+		fields = map[string]any{}
+	}
+	if _, ok := fields["name"]; !ok {
+		fields["name"] = "Test share"
+	}
+	fields["folder"] = folder.ID
+	var s shareView
+	e.expect(e.api(http.MethodPost, "/api/shares", fields), http.StatusCreated).decode(e.t, &s)
+	return s
+}
+
+// sharedNames lists the files a share's page shows, as folder/name, in order.
+func (e *testEnv) sharedNames(s shareView) []string {
+	e.t.Helper()
+	var info shareInfo
+	e.expect(e.get("/api/public/s/"+s.Token), http.StatusOK).decode(e.t, &info)
+	out := []string{}
+	for _, f := range info.Files {
+		out = append(out, joinPath(f.Path, f.Name))
+	}
+	return out
+}
+
+// A shared folder offers everything in it, also in its subfolders and what's added after the link
+// was made. The zip and the terminal instructions keep the subfolders.
+func TestShareAFolder(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	trip := e.folder(rootID, "Trip")
+	day1 := e.folder(trip.ID, "Day 1")
+	morning := e.folder(day1.ID, "Morning")
+	e.folder(trip.ID, "Empty")
+	e.upload(trip.ID, "notes.txt", []byte("notes"))
+	e.upload(day1.ID, "beach.jpg", []byte("beach"))
+	coffee := e.upload(morning.ID, "coffee.jpg", []byte("coffee"))
+	outside := e.upload(rootID, "secret.txt", []byte("not shared"))
+	s := e.shareFolder(map[string]any{"name": "Trip"}, trip)
+	if s.Folder != trip.ID || len(s.Files) != 0 {
+		t.Errorf("share = %+v; want the folder and no list of files", s)
+	}
+
+	want := []string{"notes.txt", "Day 1/beach.jpg", "Day 1/Morning/coffee.jpg"}
+	if got := e.sharedNames(s); !slices.Equal(got, want) {
+		t.Errorf("the share shows %q; want %q", got, want)
+	}
+	if r := e.expect(e.get(e.fileURL(s, coffee)), http.StatusOK); r.body != "coffee" {
+		t.Errorf("a file in a subfolder came back as %q", r.body)
+	}
+	wantBody(t, e.expect(e.get(e.fileURL(s, outside)), http.StatusNotFound), "isn't part of this share")
+
+	later := e.upload(day1.ID, "after.txt", []byte("later"))
+	want = []string{"notes.txt", "Day 1/after.txt", "Day 1/beach.jpg", "Day 1/Morning/coffee.jpg"}
+	if got := e.sharedNames(s); !slices.Equal(got, want) {
+		t.Errorf("after adding a file, the share shows %q; want %q", got, want)
+	}
+	e.expect(e.get(e.fileURL(s, later)), http.StatusOK)
+
+	got := readZip(t, e.expect(e.get("/s/"+s.Token+"/all.zip"), http.StatusOK).body)
+	wantZip := map[string]string{"notes.txt": "notes", "Day 1/after.txt": "later", "Day 1/beach.jpg": "beach", "Day 1/Morning/coffee.jpg": "coffee"}
+	if !maps.Equal(got, wantZip) {
+		t.Errorf("zip = %v; want %v", got, wantZip)
+	}
+
+	r := e.expect(e.get("/s/"+s.Token), http.StatusOK)
+	wantBody(t, r, "Day 1/Morning/coffee.jpg (6 B)", `curl -L -o 'coffee.jpg' '`+e.url+"/s/"+s.Token+"/files/"+coffee.ID+"?download'")
+	wantNoBody(t, r, "secret.txt")
+}
+
+// What's in the trash is only the owner's to see, also inside a shared folder.
+func TestSharedFolderAndTheTrash(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	trip := e.folder(rootID, "Trip")
+	day1 := e.folder(trip.ID, "Day 1")
+	a := e.upload(trip.ID, "a.txt", []byte("a"))
+	b := e.upload(day1.ID, "b.txt", []byte("b"))
+	s := e.shareFolder(nil, trip)
+
+	e.trash(day1.ID)
+	if got := e.sharedNames(s); !slices.Equal(got, []string{"a.txt"}) {
+		t.Errorf("with a subfolder in the trash, the share shows %q", got)
+	}
+	e.expect(e.get(e.fileURL(s, b)), http.StatusNotFound)
+	if got := readZip(t, e.expect(e.get("/s/"+s.Token+"/all.zip"), http.StatusOK).body); len(got) != 1 {
+		t.Errorf("zip = %v; want only a.txt", got)
+	}
+	e.expect(e.restore(day1.ID), http.StatusOK)
+	if got := e.sharedNames(s); !slices.Equal(got, []string{"a.txt", "Day 1/b.txt"}) {
+		t.Errorf("after restoring the subfolder, the share shows %q", got)
+	}
+
+	e.trash(trip.ID)
+	if got := e.sharedNames(s); len(got) != 0 {
+		t.Errorf("with the shared folder in the trash, the share shows %q", got)
+	}
+	e.expect(e.get(e.fileURL(s, a)), http.StatusNotFound)
+	e.deleteForGood(trip.ID)
+	if got := e.sharedNames(s); len(got) != 0 {
+		t.Errorf("with the shared folder deleted for good, the share shows %q", got)
+	}
+}
+
+// A PDF a stranger sent through an upload link downloads rather than opens, also when the owner
+// shares the link's folder.
+func TestShareAnUploadLinksFolder(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	l := e.createLink(nil)
+	s := e.shareFolder(nil, Item{ID: l.Folder})
+	e.expect(e.put(l.Token, "theirs.pdf", strings.NewReader("%PDF")), http.StatusOK)
+	theirs := e.filesIn(l.Folder)["theirs.pdf"]
+
+	var info shareInfo
+	e.expect(e.get("/api/public/s/"+s.Token), http.StatusOK).decode(t, &info)
+	if len(info.Files) != 1 || info.Files[0].Name != "theirs.pdf" || !info.Files[0].NoPreview {
+		t.Errorf("files = %+v; want theirs.pdf as a download", info.Files)
+	}
+	r := e.expect(e.get(e.fileURL(s, theirs)), http.StatusOK)
+	if !strings.HasPrefix(r.header.Get("Content-Disposition"), "attachment") {
+		t.Errorf("Content-Disposition = %q; want a download", r.header.Get("Content-Disposition"))
+	}
+}
+
+func TestShareAFolderRefused(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	docs := e.folder(rootID, "Docs")
+	a := e.upload(docs.ID, "a.txt", []byte("a"))
+	gone := e.folder(rootID, "Old")
+	e.trash(gone.ID)
+	for _, c := range []struct {
+		fields map[string]any
+		want   string
+	}{
+		{map[string]any{"folder": rootID}, "My files can't be shared as a whole. Share a folder in it, or pick files."},
+		{map[string]any{"folder": a.ID}, "That folder doesn't exist anymore."},
+		{map[string]any{"folder": "nope"}, "That folder doesn't exist anymore."},
+		{map[string]any{"folder": gone.ID}, "That folder is in the trash. Restore it first."},
+		{map[string]any{"folder": docs.ID, "files": []string{a.ID}}, "Share either files or a folder, not both."},
+	} {
+		c.fields["name"] = "x"
+		wantBody(t, e.expect(e.api(http.MethodPost, "/api/shares", c.fields), http.StatusBadRequest), c.want)
+	}
+
+	s := e.createShare(nil, a)
+	r := e.expect(e.api(http.MethodPatch, "/api/shares/"+s.ID, map[string]any{"folder": docs.ID}), http.StatusBadRequest)
+	wantBody(t, r, "can't be changed")
+	if got := e.share(s.ID); got.Folder != "" || len(got.Files) != 1 {
+		t.Errorf("share = %+v; want it unchanged", got)
+	}
 }
