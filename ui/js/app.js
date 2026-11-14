@@ -142,7 +142,7 @@ function linkPanel(url, name, snippets, previewHref) {
         <button type="button" class="icon-btn btn-ghost" data-action="copy-link" aria-label="Copy link" title="Copy link">${icon('copy')}</button>
       </div>
       <div class="linkbox-actions">
-        <button type="button" class="btn btn-ghost" data-action="toggle-qr" aria-expanded="false" title="Show the link as a QR code, to open it on a phone or print it">${icon('qr')} QR code</button>
+        <button type="button" class="btn" data-action="toggle-qr" aria-expanded="false" title="Show the link as a QR code, to open it on a phone or print it">${icon('qr')}<span data-qr-label>Show QR code</span>${icon('chevron-down', 'chev')}</button>
         <a class="btn btn-ghost" href="${previewHref}" target="_blank" rel="noopener" title="Open the page the recipient sees">${icon('external')} Preview</a>
       </div>
     </div>
@@ -937,6 +937,7 @@ const actions = {
     const panel = el.closest('.link-panel').querySelector('[data-qr]');
     panel.hidden = !panel.hidden;
     el.setAttribute('aria-expanded', b(!panel.hidden));
+    el.querySelector('[data-qr-label]').textContent = panel.hidden ? 'Show QR code' : 'Hide QR code';
   },
   'download-qr': (el) => downloadQr(el.dataset.url, `${slug(el.dataset.name)}-qr-code.png`),
   confirm: () => {

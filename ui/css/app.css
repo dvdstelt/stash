@@ -389,6 +389,8 @@ dialog.modal > form { display: flex; flex: 1; flex-direction: column; min-height
 .link-field .icon-btn { position: absolute; top: 2px; right: 2px; }
 .linkbox-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .linkbox .btn[aria-expanded="true"] { background: var(--surface-2); }
+.btn .chev { margin-right: -3px; color: var(--muted); transition: transform .15s; }
+.btn[aria-expanded="true"] .chev { transform: rotate(180deg); }
 /* The code stays dark on white in the dark theme too: not every phone reads a light-on-dark code. */
 .qr-panel { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
 .qr { display: block; width: 200px; height: 200px; flex: none; border-radius: 6px; }
