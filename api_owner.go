@@ -29,6 +29,7 @@ type shareView struct {
 	Token        string   `json:"token"`
 	Name         string   `json:"name"`
 	Files        []string `json:"files"`
+	Folder       string   `json:"folder"`
 	Created      int64    `json:"created"`
 	Expires      int64    `json:"expires"`
 	MaxDownloads int      `json:"maxDownloads"`
@@ -47,7 +48,7 @@ func viewShare(s *Share) shareView {
 	if files == nil {
 		files = []string{}
 	}
-	return shareView{s.ID, s.Token, s.Name, files, s.Created, s.Expires, s.MaxDownloads, s.Downloads, s.PasswordHash != "", s.Message, s.Revoked}
+	return shareView{s.ID, s.Token, s.Name, files, s.Folder, s.Created, s.Expires, s.MaxDownloads, s.Downloads, s.PasswordHash != "", s.Message, s.Revoked}
 }
 
 // handleState returns everything the owner's pages show. Stash is meant for one person's
@@ -282,6 +283,7 @@ type linkInput struct {
 	Message      *string   `json:"message"`
 	Revoked      *bool     `json:"revoked"`
 	Files        *[]string `json:"files"`
+	Folder       *string   `json:"folder"` // a share link holds files or one folder
 }
 
 // validate checks the input and hashes a new password, before any lock is taken.
@@ -427,14 +429,38 @@ func (srv *server) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if in.Files == nil || len(*in.Files) == 0 {
+	switch {
+	case in.Folder != nil && in.Files != nil:
+		jsonError(w, http.StatusBadRequest, "Share either files or a folder, not both.")
+		return
+	case in.Folder == nil && (in.Files == nil || len(*in.Files) == 0):
 		jsonError(w, http.StatusBadRequest, "Pick at least one file.")
 		return
 	}
 	srv.st.mu.Lock()
 	defer srv.st.mu.Unlock()
 	s := &Share{ID: newID(), Token: newID(), Name: *in.Name, Created: nowMillis()}
-	for _, id := range *in.Files {
+	if in.Folder != nil {
+		folder := srv.st.items[*in.Folder]
+		switch {
+		case folder == nil || folder.Type != "folder":
+			jsonError(w, http.StatusBadRequest, "That folder doesn't exist anymore.")
+			return
+		case folder.ID == rootID:
+			// That would hand out everything, including what strangers sent through upload links.
+			jsonError(w, http.StatusBadRequest, "My files can't be shared as a whole. Share a folder in it, or pick files.")
+			return
+		case srv.st.inTrash(folder.ID):
+			jsonError(w, http.StatusBadRequest, "That folder is in the trash. Restore it first.")
+			return
+		}
+		s.Folder = folder.ID
+	}
+	var files []string
+	if in.Files != nil {
+		files = *in.Files
+	}
+	for _, id := range files {
 		if it := srv.st.items[id]; it == nil || it.Type != "file" {
 			jsonError(w, http.StatusBadRequest, "One of the files doesn't exist anymore.")
 			return
@@ -460,8 +486,8 @@ func (srv *server) handleUpdateShare(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if in.Files != nil {
-		jsonError(w, http.StatusBadRequest, "The files of a share link can't be changed. Create a new link instead.")
+	if in.Files != nil || in.Folder != nil {
+		jsonError(w, http.StatusBadRequest, "What a share link shares can't be changed. Create a new link instead.")
 		return
 	}
 	hash, err := in.validate(false)

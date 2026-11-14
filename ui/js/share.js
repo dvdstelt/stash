@@ -18,6 +18,7 @@ let files = [];
 let current = 0;
 
 const fileUrl = (f, download = false) => `${base}/files/${encodeURIComponent(f.id)}${download ? '?download' : ''}`;
+const folderText = (path) => path.split('/').join(' / ');
 
 async function loadInfo() {
   try {
@@ -30,6 +31,7 @@ async function loadInfo() {
   files = (info.files ?? []).map((f) => ({
     ...f,
     type: 'file',
+    path: f.path ?? '',
     src: preview && !f.noPreview && PREVIEWABLE.has(kindOf(f.name)) ? fileUrl(f) : undefined,
     text: !preview && kindOf(f.name) === 'text' ? 'This share has a download limit, so there is no preview. Download the file to see it.' : undefined,
   }));
@@ -60,18 +62,34 @@ function gallery() {
       ${files.length ? html`<a class="btn btn-primary" href="${base}/all.zip" download="${slug(info.name)}.zip">${icon('download')} Download all</a>` : ''}
     </section>
     ${info.message ? html`<blockquote class="message">${info.message}</blockquote>` : ''}
-    ${files.length ? html`<div class="grid">${files.map((f, i) => html`
-      <div class="tile" role="button" tabindex="0" data-action="view" data-index="${i}" aria-label="View ${f.name}">
-        <div class="thumb">${thumb(f)}</div>
-        <div class="tile-body"><div class="tile-name" title="${f.name}">${f.name}</div><div class="tile-meta">${bytes(f.size)}</div></div>
-        <a class="icon-btn tile-dl" href="${fileUrl(f, true)}" download data-action="download-file" aria-label="Download ${f.name}" title="Download">${icon('download')}</a>
-      </div>`)}
-    </div>` : html`<div class="card empty">${icon('file')}<p>There are no files in this share anymore.</p></div>`}
+    ${files.length ? folderSections() : html`<div class="card empty">${icon('file')}<p>There are no files in this share anymore.</p></div>`}
     <details class="card cli">
       <summary>${icon('terminal')} Download from the command line</summary>
-      <div class="cli-body"><p>Downloads everything as one zip file, on macOS, Linux or Windows 10 and later.</p>${snippetTabs(shareSnippets(`${location.origin}${base}`, info))}</div>
+      <div class="cli-body"><p>Downloads everything as one zip file${files.some((f) => f.path) ? ', with its folders,' : ''} on macOS, Linux or Windows 10 and later.</p>${snippetTabs(shareSnippets(`${location.origin}${base}`, info))}</div>
     </details>`;
 }
+
+// A shared folder's files come grouped by subfolder, the files at the top first. Each group gets
+// its own grid under the subfolder's name.
+function folderSections() {
+  const groups = [];
+  files.forEach((f, i) => {
+    if (groups.at(-1)?.path !== f.path) groups.push({ path: f.path, tiles: [] });
+    groups.at(-1).tiles.push(fileTile(f, i));
+  });
+  if (groups.length === 1 && !groups[0].path) return html`<div class="grid">${groups[0].tiles}</div>`;
+  return html`<div class="share-folders">${groups.map((g) => html`<section>
+    ${g.path ? html`<h2 class="folder-head">${icon('folder')}<span class="min0">${folderText(g.path)}</span></h2>` : ''}
+    <div class="grid">${g.tiles}</div>
+  </section>`)}</div>`;
+}
+
+const fileTile = (f, i) => html`
+  <div class="tile" role="button" tabindex="0" data-action="view" data-index="${i}" aria-label="View ${f.name}">
+    <div class="thumb">${thumb(f)}</div>
+    <div class="tile-body"><div class="tile-name" title="${f.name}">${f.name}</div><div class="tile-meta">${bytes(f.size)}</div></div>
+    <a class="icon-btn tile-dl" href="${fileUrl(f, true)}" download data-action="download-file" aria-label="Download ${f.name}" title="Download">${icon('download')}</a>
+  </div>`;
 
 function view(index) {
   current = (index + files.length) % files.length;
@@ -79,7 +97,7 @@ function view(index) {
   const many = files.length > 1;
   lightbox.innerHTML = html`
     <div class="lb-top">
-      <div class="min0"><div class="ellipsis strong">${f.name}</div><div class="small lb-muted">${current + 1} of ${files.length} · ${bytes(f.size)}</div></div>
+      <div class="min0"><div class="ellipsis strong">${f.name}</div><div class="small lb-muted ellipsis">${current + 1} of ${files.length} · ${bytes(f.size)}${f.path ? ` · ${folderText(f.path)}` : ''}</div></div>
       <a class="btn btn-sm" href="${fileUrl(f, true)}" download>${icon('download')} Download</a>
       <button type="button" class="icon-btn" data-action="close-lightbox" aria-label="Close">${icon('x')}</button>
     </div>

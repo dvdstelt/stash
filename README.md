@@ -10,10 +10,10 @@ collect files from other people and send files to them, without anyone seeing mo
   database backup. You can also limit the number of files, set an expiry date and add a password.
   A PDF received this way is downloaded rather than opened in the browser, whose PDF viewer runs
   outside the safeguards Stash puts on other previews.
-- **Share links.** Want to send someone files? Pick them and send a share link. They can view and
-  download only those files, one by one or all at once. Share links can expire, stop after a number
-  of downloads (every file viewed or downloaded counts, so a limited share shows no previews), and
-  have a password. A download that breaks off can be resumed in the same browser for a day,
+- **Share links.** Want to send someone files? Pick them, or a whole folder, and send a share link.
+  They can view and download only what you shared, one by one or all at once. Share links can
+  expire, stop after a number of downloads (every file viewed or downloaded counts, so a limited
+  share shows no previews), and have a password. A download that breaks off can be resumed in the same browser for a day,
   without counting again.
 
 The people you send links to don't need an account. They upload from their browser, or, for very
@@ -95,12 +95,18 @@ reopen it at any time.
 ### Sending someone files: share links
 
 1. Tick the files you want to send and click **Create share link**. Or go to **Share links** and
-   click **New share link**.
+   click **New share link**. To send a whole folder, open it and click **Share folder**, or choose
+   **Share folder…** from its **⋯** menu.
 2. Give it a name and, if you like, an expiry date, a download limit, a password and a message.
 3. Copy the link and send it, or click **Show QR code** to open it on a phone or print it.
 
 They see the files with previews, and can download them one by one or all together as a zip file.
 A file you delete disappears from the link, and comes back if you restore it from the trash.
+
+A shared folder includes the folders inside it. The page shows each of them under its own heading,
+and the zip file keeps them as folders. Files you add to the folder later show up on the link too.
+**My files** itself can't be shared as a whole, because that would include what people send you
+through upload links.
 
 ### Very large files: the command line
 

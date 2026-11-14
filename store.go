@@ -47,12 +47,14 @@ type Link struct {
 	Revoked      bool   `json:"revoked,omitempty"`
 }
 
-// Share is a share link: anyone with its token can view and download the files in it.
+// Share is a share link: anyone with its token can view and download the files in it. It holds
+// either a fixed list of files, or one folder with everything in it, also what's added later.
 type Share struct {
 	ID           string   `json:"id"`
 	Token        string   `json:"token"`
 	Name         string   `json:"name"`
 	Files        []string `json:"files"`
+	Folder       string   `json:"folder,omitempty"`
 	Created      int64    `json:"created"`
 	Expires      int64    `json:"expires,omitempty"`
 	MaxDownloads int      `json:"maxDownloads,omitempty"`
@@ -373,6 +375,65 @@ func linkStatus(l *Link, used int64, files int) string {
 		return "full"
 	}
 	return "active"
+}
+
+// sharedFile is a file a share link offers, with the folder it's in relative to the shared
+// folder, such as "Day 1/Morning". Path is "" for a file at the top, and for every file of a
+// share that holds a list of files.
+type sharedFile struct {
+	Item
+	Path string
+}
+
+// shareContents returns the files a share link offers. Files in the trash are left out: they're
+// only the owner's to see. A shared folder offers what's in it now, subfolders included: the
+// files at the top first, then each subfolder in name order. Hold mu.
+func (st *store) shareContents(s *Share) []sharedFile {
+	var out []sharedFile
+	if s.Folder == "" {
+		for _, id := range s.Files {
+			if it := st.items[id]; it != nil && !st.inTrash(id) {
+				out = append(out, sharedFile{Item: *it})
+			}
+		}
+		return out
+	}
+	if st.items[s.Folder] == nil || st.inTrash(s.Folder) {
+		return nil
+	}
+	// One pass over all items, rather than one per folder, keeps large trees quick.
+	kids := map[string][]*Item{}
+	for _, it := range st.items {
+		if it.Trashed == 0 {
+			kids[it.Parent] = append(kids[it.Parent], it)
+		}
+	}
+	var walk func(folder, path string)
+	walk = func(folder, path string) {
+		list := kids[folder]
+		slices.SortFunc(list, func(a, b *Item) int { return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)) })
+		for _, it := range list {
+			if it.Type == "file" {
+				out = append(out, sharedFile{*it, path})
+			}
+		}
+		for _, it := range list {
+			if it.Type == "folder" {
+				walk(it.ID, joinPath(path, it.Name))
+			}
+		}
+	}
+	walk(s.Folder, "")
+	return out
+}
+
+// joinPath puts a name after a folder path. Names never contain a slash: cleanName and renaming
+// see to that.
+func joinPath(path, name string) string {
+	if path == "" {
+		return name
+	}
+	return path + "/" + name
 }
 
 func shareStatus(s *Share) string {

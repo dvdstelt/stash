@@ -167,8 +167,24 @@ const store = {
   // Share links
   shares: () => [...shares].sort((a, b) => b.created - a.created),
   share: (id) => shares.find((s) => s.id === id),
-  /** The files a share link offers. Files in the trash are left out, as they are for visitors. */
-  shareFiles(s) { return s.files.map((id) => items.get(id)).filter((it) => it && !this.inTrash(it.id)); },
+  /**
+   * The files a share link offers: its files, or everything in its folder and the folders in
+   * there. Files in the trash are left out, as they are for visitors.
+   */
+  shareFiles(s) {
+    if (!s.folder) return s.files.map((id) => items.get(id)).filter((it) => it && !this.inTrash(it.id));
+    if (!items.has(s.folder) || this.inTrash(s.folder)) return [];
+    const kids = new Map();
+    for (const it of items.values()) {
+      if (it.trashed) continue;
+      if (!kids.has(it.parent)) kids.set(it.parent, []);
+      kids.get(it.parent).push(it);
+    }
+    const out = [];
+    const walk = (id) => (kids.get(id) ?? []).forEach((c) => (c.type === 'file' ? out.push(c) : walk(c.id)));
+    walk(s.folder);
+    return out;
+  },
   sharedInTrash(s) { return s.files.filter((id) => items.has(id) && this.inTrash(id)).length; },
 
   shareStatus(s) {
