@@ -3,7 +3,7 @@
 const {
   html, raw, b, icon, bytes, rel, date, kindOf, thumb, previewMedia,
   snippetTabs, uploadSnippets, shareSnippets, toast, copy, delegate, hydrateIcons,
-  uploadRow, updateUploadRow, dropZone, slug, qrSvg, downloadQr,
+  uploadRow, updateUploadRow, dropZone, pickedFiles, droppedFiles, slug, qrSvg, downloadQr,
 } = window.StashUI;
 const { store, uploadUrl, shareUrl, MB, GB, TB } = window.StashData;
 const { request, uploadFile } = window.StashAPI;
@@ -192,10 +192,10 @@ function filesView(folderId) {
       </div>
     </div>
     ${kids.length
-      ? html`${dropZone({ compact: true, title: `Drag files here to upload them to ${folder.name}`, hint: 'Or drop them anywhere on this page. As many files as you like.', button: 'Upload files' })}
+      ? html`${dropZone({ compact: true, title: `Drag files or folders here to upload them to ${folder.name}`, hint: 'Or drop them anywhere on this page. As many as you like.', button: 'Upload files', folderButton: 'Upload folder' })}
              ${selectionBar()}
              ${itemsView(kids)}`
-      : dropZone({ title: 'This folder is empty', hint: `Drag files here to upload them to ${folder.name}.`, button: 'Upload files' })}`;
+      : dropZone({ title: 'This folder is empty', hint: `Drag files or folders here to upload them to ${folder.name}.`, button: 'Upload files', folderButton: 'Upload folder' })}`;
 }
 
 const layoutToggle = () => html`<div class="seg" role="group" aria-label="Layout">
@@ -394,28 +394,34 @@ function renameForm(id, reopen = false) {
 
 // Each file gets its own row and progress bar in a panel in the bottom-right corner, and appears
 // in its folder once it's uploaded. The server checks the free space, so a file that doesn't fit
-// shows that message in its row.
+// shows that message in its row. Files of an uploaded folder go up one by one too, each with the
+// folder it was in; the server makes the folders as the files arrive.
 
 const tray = $('#tray');
 const uploads = [];
 let uploadSeq = 0;
 let trayCollapsed = false;
 
-function addOwnerFiles(fileList) {
-  const list = [...fileList];
-  if (!list.length) return;
-  const { section } = route();
-  const target = section === 'files' && !state.query ? state.folder : 'root';
-  for (const file of list) {
-    const u = { id: ++uploadSeq, name: file.name, size: file.size, loaded: 0, status: 'uploading' };
+/** The folder that files dropped or picked now go to. */
+const uploadTarget = () => (route().section === 'files' && !state.query ? state.folder : 'root');
+
+/** Starts uploading files from pickedFiles or droppedFiles into a folder. */
+function addOwnerFiles(files, target = uploadTarget()) {
+  if (!files.length) return;
+  for (const { file, path, name, error } of files) {
+    const u = { id: ++uploadSeq, name: file?.name ?? name, path, size: file?.size ?? 0, loaded: 0, status: 'uploading' };
     uploads.unshift(u);
+    if (error) {
+      Object.assign(u, { status: 'error', error });
+      continue;
+    }
     u.job = uploadFile(file, {
       base: '/api/uploads',
-      fields: { parent: target },
+      fields: { parent: target, path },
       onProgress: (n) => { u.loaded = n; updateUploadRow(tray, u); },
     });
     u.job.done.then((item) => {
-      Object.assign(u, { status: 'done', loaded: u.size, doneText: `${bytes(item.size)} · in ${store.item(item.parent)?.name ?? 'My files'}` });
+      Object.assign(u, { status: 'done', loaded: u.size, parent: item.parent });
       refresh();
     }, (err) => {
       if (err.status === -1) return; // cancelled, and the row is already gone
@@ -456,6 +462,11 @@ function renderTray() {
   const busy = uploads.filter((u) => u.status === 'uploading').length;
   const done = uploads.filter((u) => u.status === 'done').length;
   const failed = uploads.length - busy - done;
+  // A folder that came with an upload is only known once everything is loaded again.
+  for (const u of uploads) {
+    const folder = u.status === 'done' && store.item(u.parent);
+    if (folder) u.doneText = `${bytes(u.size)} · in ${folder.name}`;
+  }
   const title = [
     busy ? `Uploading ${plural(busy, 'file')}` : `${plural(done, 'upload')} complete`,
     busy && done ? `${done} done` : '',
@@ -1155,10 +1166,10 @@ document.addEventListener('input', (e) => {
   e.target.closest('.picker').querySelectorAll('.pick').forEach((el) => { el.hidden = Boolean(q) && !el.dataset.name.includes(q); });
 });
 
-// Upload with the drop area's button, or by dropping files anywhere on a folder's page.
+// Upload with the drop area's buttons, or by dropping files and folders anywhere on a folder's page.
 document.addEventListener('change', (e) => {
   if (!e.target.matches('[data-file-input]')) return;
-  addOwnerFiles(e.target.files);
+  addOwnerFiles(pickedFiles(e.target));
   e.target.value = '';
 });
 
@@ -1179,9 +1190,13 @@ document.addEventListener('dragleave', (e) => {
 });
 document.addEventListener('drop', (e) => {
   document.body.classList.remove('dropping');
-  if (!e.dataTransfer?.files.length) return;
+  if (!e.dataTransfer?.types.includes('Files')) return;
   e.preventDefault();
-  if (canDropHere()) addOwnerFiles(e.dataTransfer.files);
+  if (!canDropHere()) return;
+  // Reading dropped folders takes a moment: the files go where they were dropped, even if the
+  // owner opens another folder meanwhile.
+  const target = uploadTarget();
+  droppedFiles(e.dataTransfer).then((files) => addOwnerFiles(files, target));
 });
 
 

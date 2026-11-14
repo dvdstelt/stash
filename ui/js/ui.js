@@ -207,7 +207,8 @@ const passwordGate = (title, text) => html`<section class="card state">
 
 /* ---------- Upload rows (one per file, each with its own progress bar) ---------- */
 
-// An upload is { id, name, size, loaded, status: 'uploading' | 'done' | 'error', error?, doneText? }.
+// An upload is { id, name, path, size, loaded, status: 'uploading' | 'done' | 'error', error?, doneText? },
+// where path is the folder the file was in when a whole folder is uploaded, or ''.
 
 /** Prototype only: bytes per second, so small files take about a second and huge ones under ten. */
 const simulatedRate = (size) => Math.max(1, size / (1.2 + 0.9 * Math.log10(Math.max(size, 1e3) / 1e3)));
@@ -222,16 +223,17 @@ function uploadStateText(u) {
 
 function uploadRow(u) {
   const kind = kindOf(u.name);
+  const name = u.path ? `${u.path}/${u.name}` : u.name;
   return html`<div class="upl ${u.status}" data-upl="${u.id}">
     <span class="kind kind-${kind}">${icon(KIND_ICON[kind])}</span>
     <div class="min0">
-      <div class="upl-top"><span class="ellipsis strong" title="${u.name}">${u.name}</span><span class="upl-state">${uploadStateText(u)}</span></div>
+      <div class="upl-top"><span class="ellipsis strong" title="${name}">${name}</span><span class="upl-state">${uploadStateText(u)}</span></div>
       ${u.status === 'error'
         ? html`<div class="upl-error">${u.error}</div>`
         : html`<div class="meter thin${u.status === 'done' ? ' done' : ''}"><span style="width:${uploadPercent(u)}%"></span></div>`}
     </div>
     ${u.status === 'uploading'
-      ? html`<button type="button" class="icon-btn btn-ghost" data-action="remove-upload" data-id="${u.id}" aria-label="Cancel uploading ${u.name}" title="Cancel">${icon('x')}</button>`
+      ? html`<button type="button" class="icon-btn btn-ghost" data-action="remove-upload" data-id="${u.id}" aria-label="Cancel uploading ${name}" title="Cancel">${icon('x')}</button>`
       : u.status === 'error'
         ? html`<button type="button" class="icon-btn btn-ghost" data-action="remove-upload" data-id="${u.id}" aria-label="Dismiss" title="Dismiss">${icon('x')}</button>`
         : html`<span class="done-mark">${icon('check')}</span>`}
@@ -248,17 +250,75 @@ function updateUploadRow(root, u) {
 
 /* ---------- Drop area ---------- */
 
+// One dialog can't pick files and folders at once, so folders get their own button. Phones and
+// tablets can't pick a folder, even where the input knows webkitdirectory, so they don't get it.
+const canPickFolders = 'webkitdirectory' in HTMLInputElement.prototype && !matchMedia('(pointer: coarse)').matches;
+
 /**
- * An area to drag files onto, with its own button to pick them instead.
- * Pages handle `change` on [data-file-input] and drag events on [data-dropzone].
+ * An area to drag files and folders onto, with buttons to pick them instead.
+ * Pages handle `change` on [data-file-input] (see pickedFiles) and drag events on [data-dropzone]
+ * (see droppedFiles).
  */
-function dropZone({ title, hint, button = 'Choose files', compact = false, disabled = false }) {
+function dropZone({ title, hint, button = 'Choose files', folderButton = 'Choose folder', compact = false, disabled = false }) {
+  const folders = canPickFolders && !disabled;
   return html`<div class="dropzone${compact ? ' compact' : ''}${disabled ? ' disabled' : ''}" data-dropzone ${disabled ? '' : raw('data-action="choose-files"')}>
     <input type="file" multiple hidden data-file-input ${disabled ? raw('disabled') : ''}>
+    ${folders ? raw('<input type="file" webkitdirectory hidden data-file-input data-folder-input>') : ''}
     <span class="dz-icon">${icon('upload')}</span>
     <span class="dz-text"><strong>${title}</strong><span class="hint">${hint}</span></span>
-    ${disabled ? '' : html`<button type="button" class="btn btn-primary">${icon('upload')} ${button}</button>`}
+    ${disabled ? '' : html`<span class="dz-buttons">
+      <button type="button" class="btn btn-primary">${icon('upload')} ${button}</button>
+      ${folders ? html`<button type="button" class="btn" data-action="choose-folder">${icon('folder')} ${folderButton}</button>` : ''}
+    </span>`}
   </div>`;
+}
+
+/* ---------- Files and folders to upload ---------- */
+
+// Files to upload come as { file, path }, where path is the folder the file was in when a whole
+// folder is uploaded, such as "Trip/Day 1", or ''. A file or folder that can't be read comes as
+// { name, path, error }, so the page can say so in its row. Empty folders are left out: the
+// server makes folders as their files arrive.
+
+/** The files picked with a drop area's buttons. Files from the folder button know their folder. */
+function pickedFiles(input) {
+  return [...input.files].map((file) => ({ file, path: (file.webkitRelativePath ?? '').split('/').slice(0, -1).join('/') }));
+}
+
+/**
+ * The files of a drop, with everything in dropped folders. `files` only holds the folder itself,
+ * which can't be read, so folders are walked with webkitGetAsEntry. A drop's items can only be
+ * read during the drop event: call this right away, and it reads the folders afterwards.
+ */
+function droppedFiles(dataTransfer) {
+  const items = [...(dataTransfer.items ?? [])].filter((it) => it.kind === 'file');
+  if (!items.length) return Promise.resolve([...dataTransfer.files].map((file) => ({ file, path: '' })));
+  const dropped = items.map((it) => ({ entry: it.webkitGetAsEntry?.(), file: it.getAsFile() }));
+  return Promise.all(dropped.map(({ entry, file }) => (entry?.isDirectory ? readFolder(entry, '') : [{ file, path: '' }])))
+    .then((lists) => lists.flat().filter((f) => f.file || f.error));
+}
+
+async function readFolder(dir, parent) {
+  const path = parent ? `${parent}/${dir.name}` : dir.name;
+  const reader = dir.createReader();
+  let out = [];
+  for (;;) {
+    // Each call gives the next part of the folder (100 entries in Chrome), and nothing at the end.
+    let batch;
+    try {
+      batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+    } catch {
+      return [...out, { name: dir.name, path: parent, error: 'Couldn’t read this folder.' }];
+    }
+    if (!batch.length) return out;
+    const read = await Promise.all(batch.map((entry) => (entry.isDirectory
+      ? readFolder(entry, path)
+      : new Promise((resolve) => entry.file(
+        (file) => resolve([{ file, path }]),
+        () => resolve([{ name: entry.name, path, error: 'Couldn’t read this file.' }]),
+      )))));
+    out = out.concat(...read);
+  }
 }
 
 /* ---------- QR codes ---------- */
@@ -602,10 +662,11 @@ const common = {
     root.querySelectorAll('[role=tabpanel]').forEach((p) => { p.hidden = p.dataset.tab !== el.dataset.tab; });
   },
   'select-text': (el) => el.select(),
-  // Any click in a drop area opens the file picker. The hidden input's own click bubbles back here, so skip it.
+  // Any click in a drop area opens the file picker. The hidden inputs' own clicks bubble back here, so skip them.
   'choose-files': (el, e) => {
     if (!e.target.matches('input')) el.querySelector('[data-file-input]')?.click();
   },
+  'choose-folder': (el) => el.closest('[data-dropzone]').querySelector('[data-folder-input]')?.click(),
   theme: () => toggleTheme(),
 };
 
@@ -634,6 +695,6 @@ function delegate(actions = {}, submits = {}) {
 window.StashUI = {
   Safe, esc, raw, b, html, icon, hydrateIcons, bytes, rel, date, slug, KIND_ICON, kindOf, imgSrc, thumb, previewMedia,
   uploadSnippets, shareSnippets, snippetTabs, brandHeader, stateCard, passwordGate, toast, copy, toggleTheme, delegate,
-  simulatedRate, uploadRow, updateUploadRow, dropZone, qrCode, qrSvg, downloadQr,
+  simulatedRate, uploadRow, updateUploadRow, dropZone, pickedFiles, droppedFiles, qrCode, qrSvg, downloadQr,
 };
 })();

@@ -21,16 +21,21 @@ const shareUrl = (s) => `${origin}/s/${s.token}`;
 
 function ingest(state) {
   const previous = items;
-  items = new Map(state.items.map((it) => {
-    if (it.type === 'file') {
-      // A PDF that came through an upload link is sent as a download, so there is nothing to show inline.
-      const downloadOnly = kindOf(it.name) === 'pdf' && state.links.some((l) => l.folder === it.parent);
-      if (PREVIEWABLE.has(kindOf(it.name)) && !downloadOnly) it.src = contentUrl(it.id);
-      const before = previous.get(it.id);
-      if (before?.text !== undefined) it.text = before.text; // keep text previews already fetched
-    }
-    return [it.id, it];
-  }));
+  items = new Map(state.items.map((it) => [it.id, it]));
+  const linkFolders = new Set(state.links.map((l) => l.folder));
+  const underLink = (it) => {
+    for (let f = items.get(it.parent); f; f = items.get(f.parent)) if (linkFolders.has(f.id)) return true;
+    return false;
+  };
+  for (const it of items.values()) {
+    if (it.type !== 'file') continue;
+    // A PDF that came through an upload link, also in a folder that came with it, is sent as a
+    // download, so there is nothing to show inline.
+    const downloadOnly = kindOf(it.name) === 'pdf' && underLink(it);
+    if (PREVIEWABLE.has(kindOf(it.name)) && !downloadOnly) it.src = contentUrl(it.id);
+    const before = previous.get(it.id);
+    if (before?.text !== undefined) it.text = before.text; // keep text previews already fetched
+  }
   links = state.links;
   shares = state.shares;
   storage = state.storage;
@@ -39,6 +44,21 @@ function ingest(state) {
 }
 
 const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
+
+/** The files in a folder and in the folders in there, leaving out what's in the trash. */
+function filesBelow(folder) {
+  const kids = new Map(); // one pass over everything, rather than one per folder
+  for (const it of items.values()) {
+    if (it.trashed) continue;
+    if (!kids.has(it.parent)) kids.set(it.parent, []);
+    kids.get(it.parent).push(it);
+  }
+  const out = [];
+  const walk = (id) => (kids.get(id) ?? []).forEach((c) => (c.type === 'file' ? out.push(c) : walk(c.id)));
+  walk(folder);
+  return out;
+}
+
 const isExpired = (ts) => ts && ts <= Date.now();
 
 const store = {
@@ -140,9 +160,10 @@ const store = {
   request: (id) => links.find((r) => r.id === id),
   requestForFolder: (folderId) => links.find((r) => r.folder === folderId),
 
+  /** What came in through an upload link, counting folders that came with it, as the server does. */
   usage(r) {
-    const files = this.children(r.folder).filter((i) => i.type === 'file');
-    return { used: files.reduce((sum, f) => sum + f.size, 0), files: files.length, last: Math.max(0, ...files.map((f) => f.modified)) };
+    const files = filesBelow(r.folder);
+    return { used: files.reduce((sum, f) => sum + f.size, 0), files: files.length, last: files.reduce((last, f) => Math.max(last, f.modified), 0) };
   },
 
   status(r) {
@@ -174,16 +195,7 @@ const store = {
   shareFiles(s) {
     if (!s.folder) return s.files.map((id) => items.get(id)).filter((it) => it && !this.inTrash(it.id));
     if (!items.has(s.folder) || this.inTrash(s.folder)) return [];
-    const kids = new Map();
-    for (const it of items.values()) {
-      if (it.trashed) continue;
-      if (!kids.has(it.parent)) kids.set(it.parent, []);
-      kids.get(it.parent).push(it);
-    }
-    const out = [];
-    const walk = (id) => (kids.get(id) ?? []).forEach((c) => (c.type === 'file' ? out.push(c) : walk(c.id)));
-    walk(s.folder);
-    return out;
+    return filesBelow(s.folder);
   },
   sharedInTrash(s) { return s.files.filter((id) => items.has(id) && this.inTrash(id)).length; },
 

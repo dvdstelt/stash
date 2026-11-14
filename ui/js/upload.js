@@ -3,7 +3,7 @@
 
 const {
   html, icon, bytes, date, uploadSnippets, snippetTabs, uploadRow, updateUploadRow, dropZone,
-  delegate, brandHeader, stateCard, passwordGate,
+  pickedFiles, droppedFiles, delegate, brandHeader, stateCard, passwordGate,
 } = window.StashUI;
 const { request, uploadFile } = window.StashAPI;
 
@@ -73,7 +73,7 @@ function uploader() {
 
     ${blocked
       ? dropZone({ title: 'This link is full', hint: 'You can’t add more files.', disabled: true })
-      : dropZone({ title: 'Drag files here', hint: `Any kind of file · up to ${bytes(left)} in total`, button: 'Choose files' })}
+      : dropZone({ title: 'Drag files or folders here', hint: `Any kind of file · up to ${bytes(left)} in total` })}
 
     ${uploads.length ? html`<section class="card uploads" aria-live="polite">
       <h2>Your uploads${done ? ` · ${done} of ${uploads.filter((u) => u.status !== 'error').length} done` : ''}</h2>
@@ -91,12 +91,15 @@ function uploader() {
     <p class="fine">${icon('lock', 'xs')} You can only upload here. You can’t see files anyone else has uploaded.</p>`;
 }
 
-function add(fileList) {
-  for (const file of fileList) {
+/** Starts uploading files from pickedFiles or droppedFiles, each into the folder it was in. */
+function add(files) {
+  for (const { file, path, name, error } of files) {
     const { left, filesLeft } = room();
-    const u = { id: ++seq, name: file.name, size: file.size, loaded: 0, status: 'uploading' };
+    const u = { id: ++seq, name: file?.name ?? name, path, size: file?.size ?? 0, loaded: 0, status: 'uploading' };
     uploads.unshift(u);
-    if (filesLeft <= 0) {
+    if (error) {
+      Object.assign(u, { status: 'error', error });
+    } else if (filesLeft <= 0) {
       Object.assign(u, { status: 'error', error: `This link takes at most ${info.maxFiles} files.` });
     } else if (file.size > left) {
       Object.assign(u, { status: 'error', error: left ? `Too large. Only ${bytes(left)} is left on this link.` : 'There’s no space left on this link.' });
@@ -108,7 +111,7 @@ function add(fileList) {
 }
 
 function start(u, file) {
-  u.job = uploadFile(file, { base: `${api}/uploads`, onProgress: (n) => { u.loaded = n; updateUploadRow(page, u); } });
+  u.job = uploadFile(file, { base: `${api}/uploads`, fields: { path: u.path }, onProgress: (n) => { u.loaded = n; updateUploadRow(page, u); } });
   u.job.done.then((item) => {
     Object.assign(u, { status: 'done', loaded: u.size });
     info.used += item.size;
@@ -148,7 +151,7 @@ delegate({
 });
 
 page.addEventListener('change', (e) => {
-  if (e.target.matches('[data-file-input]')) add(e.target.files);
+  if (e.target.matches('[data-file-input]')) add(pickedFiles(e.target));
 });
 for (const type of ['dragenter', 'dragover']) {
   page.addEventListener(type, (e) => {
@@ -167,7 +170,7 @@ page.addEventListener('drop', (e) => {
   if (!zone) return;
   e.preventDefault();
   zone.classList.remove('drag');
-  add(e.dataTransfer.files);
+  droppedFiles(e.dataTransfer).then(add);
 });
 // A drop that misses the drop zone shouldn't open the file in the browser.
 window.addEventListener('dragover', (e) => e.preventDefault());

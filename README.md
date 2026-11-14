@@ -68,6 +68,9 @@ once.
 
 - Drag files onto the page, or click **Upload files**. Every file gets its own progress bar, and
   you can keep working while they upload.
+- Folders work the same way: drag them onto the page, or click **Upload folder**. The folders inside
+  come along. If a folder with the same name is already there, the files are added to it. Empty
+  folders are left out.
 - Click **New folder** to make a folder.
 - Click a file to see it, download it, share it or delete it.
 - Every file and folder has a **⋯** button with everything you can do with it. Right-clicking a
@@ -85,8 +88,9 @@ once.
    and you can download the code to print it, for example on a sign at an event.
 
 The person who opens the link sees your message, how much space is left, and an area to drag files
-onto. They can't see files that are already there. If the link is full, has expired or was revoked,
-they get a clear message instead.
+or folders onto. They can't see files that are already there. If the link is full, has expired or
+was revoked, they get a clear message instead. A folder they upload arrives with the folders inside
+it, and every file in it counts towards the link's limits.
 
 Files arrive in **My files › Requests**, in a folder named after the link. Renaming that folder
 renames the link too, and deleting it revokes the link. You can change a link's limits, revoke it or

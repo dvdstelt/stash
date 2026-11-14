@@ -450,7 +450,7 @@ dialog.modal > form { display: flex; flex: 1; flex-direction: column; min-height
 .dropzone:hover, .dropzone.drag { border-color: var(--accent); background: var(--accent-soft); }
 .dropzone.disabled { cursor: not-allowed; opacity: .7; }
 .dropzone.disabled:hover { border-color: var(--border-strong); background: var(--surface); }
-.dropzone > .btn { margin-top: 12px; }
+.dz-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
 .dz-icon { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 6px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); }
 .dz-icon .icon { width: 22px; height: 22px; }
 .dz-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -459,10 +459,11 @@ dialog.modal > form { display: flex; flex: 1; flex-direction: column; min-height
 .dropzone.compact .dz-icon { flex: none; width: 40px; height: 40px; margin: 0; }
 .dropzone.compact .dz-icon .icon { width: 19px; height: 19px; }
 .dropzone.compact .dz-text { flex: 1; }
-.dropzone.compact > .btn { flex: none; margin: 0; }
+.dropzone.compact .dz-buttons { flex: none; margin: 0; }
 @media (max-width: 520px) {
   .dropzone.compact { flex-wrap: wrap; }
-  .dropzone.compact > .btn { flex: 1 1 100%; }
+  .dropzone.compact .dz-buttons { flex: 1 1 100%; }
+  .dropzone.compact .dz-buttons > .btn { flex: 1; }
 }
 .public .uploads { padding: 6px 0 0; }
 .uploads h2 { margin: 6px 16px 10px; color: var(--muted); font-size: 13px; font-weight: 600; }

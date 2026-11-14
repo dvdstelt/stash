@@ -276,8 +276,13 @@ upload links it's `/api/public/d/<token>/uploads`.
 
 ### Folders
 
-A folder is uploaded one file at a time, each with its `path`. Strangers can't make folders, so the
-server makes them, inside `parent` or the link's folder:
+A folder is uploaded one file at a time, each with its `path`. The pages read a dropped folder with
+`webkitGetAsEntry()`, because `dataTransfer.files` only holds the folder itself, which can't be
+read. The **Upload folder** button is an `<input type="file" webkitdirectory>`, since one dialog
+can't pick files and folders at once; touch screens don't get it, because they can't pick folders.
+Empty folders are left out: there's no file to bring them along.
+
+Strangers can't make folders, so the server makes them, inside `parent` or the link's folder:
 
 - **Cleaned element by element.** `/` and `\` both separate folders. Each element is cleaned like a
   file name, and elements without a usable name (empty, `.` or `..`) are left out. The elements are
@@ -372,6 +377,7 @@ Resuming doesn't count either, from the browser that started the download (see
 - Resuming a share download from the command line (`curl -C -` without a cookie jar) counts as a
   new download, and so does resuming after Stash restarts.
 - Files and folders can't be moved to another folder yet.
+- The command line uploads single files, into the link's folder. A folder has to be zipped first.
 - The tests cover the server, not the page scripts. See [Checking changes](#checking-changes).
 
 ## Development
@@ -447,13 +453,16 @@ The tests don't cover the page scripts. After changing those, check by hand:
 
 1. Start with an empty data folder, set the password with the printed link, and sign in.
 2. Upload several files at once in the browser, including one larger than 32 MB.
-3. Create an upload link with a small limit and a password, and upload through its page.
-4. Create a share link, open it, and download one file and the zip. Share a folder with a
+3. Drop a folder with a subfolder onto a folder's page, and pick one with **Upload folder**. Drop
+   the same folder again, and check that its files land in the folders already there.
+4. Create an upload link with a small limit and a password, and upload through its page, also a
+   folder. Check that the link's page in My files counts the files in its subfolders.
+5. Create a share link, open it, and download one file and the zip. Share a folder with a
    subfolder, add a file to it, and check that the share page shows it under the subfolder's name.
-5. Show a link's QR code, scan it with a phone, and download the image.
-6. Delete a shared file and a folder from their menu. Check that the share page leaves the file
+6. Show a link's QR code, scan it with a phone, and download the image.
+7. Delete a shared file and a folder from their menu. Check that the share page leaves the file
    out, restore both from the Trash, and empty the trash.
-7. Look at the browser console for errors.
+8. Look at the browser console for errors.
 
 [AGENTS.md](../AGENTS.md) lists the conventions and the security rules changes must keep.
 
