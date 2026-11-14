@@ -457,12 +457,15 @@ The tests don't cover the page scripts. After changing those, check by hand:
    the same folder again, and check that its files land in the folders already there.
 4. Create an upload link with a small limit and a password, and upload through its page, also a
    folder. Check that the link's page in My files counts the files in its subfolders.
-5. Create a share link, open it, and download one file and the zip. Share a folder with a
+5. In a folder with files and a subfolder, tick all files with Ctrl+A, with the list's header
+   checkbox, and with **Select all** in the grid's selection bar. Only the folder's own files are
+   ticked. Ctrl+A in the search box still selects the text there.
+6. Create a share link, open it, and download one file and the zip. Share a folder with a
    subfolder, add a file to it, and check that the share page shows it under the subfolder's name.
-6. Show a link's QR code, scan it with a phone, and download the image.
-7. Delete a shared file and a folder from their menu. Check that the share page leaves the file
+7. Show a link's QR code, scan it with a phone, and download the image.
+8. Delete a shared file and a folder from their menu. Check that the share page leaves the file
    out, restore both from the Trash, and empty the trash.
-8. Look at the browser console for errors.
+9. Look at the browser console for errors.
 
 [AGENTS.md](../AGENTS.md) lists the conventions and the security rules changes must keep.
 
