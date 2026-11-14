@@ -751,3 +751,129 @@ func TestRestartClearsUnfinishedUploads(t *testing.T) {
 		t.Errorf("%d partial files are left after a restart", len(parts))
 	}
 }
+
+/* ---------- Uploading a folder ---------- */
+
+// A folder dropped on the owner's page arrives one file at a time, each with the folder it was
+// in. The folders are made as the files land, and files from the same folder end up together.
+func TestOwnerFolderUpload(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	var docs Item
+	e.expect(e.api(http.MethodPost, "/api/folders", map[string]string{"parent": rootID, "name": "Docs"}), http.StatusCreated).decode(t, &docs)
+
+	a := e.uploadIn(docs.ID, "Trip", "a.jpg", []byte("a"))
+	b := e.uploadIn(docs.ID, "Trip/Day 1", "b.jpg", []byte("b"))
+	c := e.uploadIn(docs.ID, `trip\Day 1`, "c.jpg", []byte("c")) // Windows separators, and another case
+	// Elements without a usable name are left out, so a path can't lead out of the folder.
+	d := e.uploadIn(docs.ID, "../../ /./Trip//\x00Day 1/", "d.jpg", []byte("d"))
+	for _, f := range []struct {
+		item Item
+		want string
+	}{
+		{a, "Docs/Trip/a.jpg"},
+		{b, "Docs/Trip/Day 1/b.jpg"},
+		{c, "Docs/Trip/Day 1/c.jpg"},
+		{d, "Docs/Trip/Day 1/d.jpg"},
+	} {
+		if got := e.pathOf(f.item.ID); got != f.want {
+			t.Errorf("%s landed in %q; want %q", f.item.Name, got, f.want)
+		}
+	}
+	if got := e.listing(docs.ID); got != "Trip/" {
+		t.Errorf("Docs holds %q; want only Trip", got)
+	}
+	if got := e.listing(a.Parent); got != "Day 1/, a.jpg" {
+		t.Errorf("Trip holds %q", got)
+	}
+
+	// Uploading the folder again adds to it, rather than making Trip (2). A file name that's
+	// taken gets a number, as it does for any upload.
+	if again := e.uploadIn(docs.ID, "Trip", "a.jpg", []byte("again")); e.pathOf(again.ID) != "Docs/Trip/a (2).jpg" {
+		t.Errorf("uploading Trip again put a.jpg in %q", e.pathOf(again.ID))
+	}
+
+	// A file called Notes is in the way, so the folder becomes Notes (2), the same for every file.
+	e.upload(rootID, "Notes", []byte("n"))
+	one := e.uploadIn(rootID, "Notes", "1.txt", []byte("1"))
+	two := e.uploadIn(rootID, "Notes/More", "2.txt", []byte("2"))
+	if e.pathOf(one.ID) != "Notes (2)/1.txt" || e.pathOf(two.ID) != "Notes (2)/More/2.txt" {
+		t.Errorf("with a file called Notes, files landed in %q and %q", e.pathOf(one.ID), e.pathOf(two.ID))
+	}
+
+	// A folder in the trash isn't added to: the files get a new folder of that name.
+	old := e.uploadIn(rootID, "Old", "1.txt", []byte("1"))
+	e.expect(e.api(http.MethodPost, "/api/items/trash", map[string]any{"ids": []string{old.Parent}}), http.StatusOK)
+	fresh := e.uploadIn(rootID, "Old", "2.txt", []byte("2"))
+	if fresh.Parent == old.Parent || e.pathOf(fresh.ID) != "Old/2.txt" {
+		t.Errorf("uploading into a folder in the trash put the file in %q", e.pathOf(fresh.ID))
+	}
+
+	// An upload that doesn't finish leaves no empty folder behind.
+	var started struct{ ID string }
+	e.expect(e.api(http.MethodPost, "/api/uploads", map[string]any{"parent": rootID, "path": "Never/Ever", "name": "x.bin", "size": 4}), http.StatusCreated).decode(t, &started)
+	e.expect(e.send(e.owner, http.MethodDelete, "/api/uploads/"+started.ID, nil, "X-Stash", "1"), http.StatusNoContent)
+	if got := e.listing(rootID); strings.Contains(got, "Never") {
+		t.Errorf("a cancelled upload left a folder: My files holds %q", got)
+	}
+
+	deep := strings.Repeat("a/", maxFolderDepth)
+	if f := e.uploadIn(rootID, deep, "deep.txt", []byte("x")); e.pathOf(f.ID) != deep+"deep.txt" {
+		t.Errorf("a path %d folders deep landed in %q", maxFolderDepth, e.pathOf(f.ID))
+	}
+	r := e.expect(e.api(http.MethodPost, "/api/uploads", map[string]any{"parent": rootID, "path": deep + "a", "name": "x", "size": 1}), http.StatusBadRequest)
+	wantBody(t, r, "nested too deeply: at most 64 inside each other")
+	e.checkNothingReserved()
+}
+
+// Strangers can't make folders, but they can upload one. Its folders are made inside the link's
+// folder, and the files in them count towards the link's limits.
+func TestFolderUploadThroughLink(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	l := e.createLink(map[string]any{"name": "Photos", "quota": 10, "maxFiles": 3})
+	b := newBrowser()
+	start := func(path, name string, size int) reply {
+		return e.sendJSON(b, http.MethodPost, "/api/public/d/"+l.Token+"/uploads", map[string]any{"path": path, "name": name, "size": size})
+	}
+	upload := func(path, name, data string) Item {
+		t.Helper()
+		return e.uploadThrough(b, l.Token, path, name, data)
+	}
+
+	a := upload("Trip", "a.jpg", "aaaa")
+	day1 := upload("Trip/Day 1", "b.jpg", "bbbb")
+	if e.pathOf(a.ID) != "Requests/Photos/Trip/a.jpg" || e.pathOf(day1.ID) != "Requests/Photos/Trip/Day 1/b.jpg" {
+		t.Errorf("files landed in %q and %q", e.pathOf(a.ID), e.pathOf(day1.ID))
+	}
+	if info := e.linkInfo(b, l.Token, http.StatusOK); info.Used != 8 || info.Files != 2 {
+		t.Errorf("with files in subfolders, used %d and files %d; want 8 and 2", info.Used, info.Files)
+	}
+	r := e.expect(start("Trip", "c.jpg", 3), http.StatusRequestEntityTooLarge)
+	wantBody(t, r, "Too large: only 2 B is left on this link.")
+
+	// Deleting a subfolder makes room on the link again.
+	e.expect(e.api(http.MethodPost, "/api/items/trash", map[string]any{"ids": []string{day1.Parent}}), http.StatusOK)
+	if info := e.linkInfo(b, l.Token, http.StatusOK); info.Used != 4 || info.Files != 1 {
+		t.Errorf("after deleting Day 1, used %d and files %d; want 4 and 1", info.Used, info.Files)
+	}
+	upload("Trip/Day 2", "c.jpg", "c")
+	upload("", "d.jpg", "d")
+	r = e.expect(start("Trip", "e.jpg", 1), http.StatusForbidden)
+	wantBody(t, r, "This link takes at most 3 files.")
+	if info := e.linkInfo(b, l.Token, http.StatusOK); info.Status != "full" || info.Files != 3 {
+		t.Errorf("link = %+v; want full with 3 files", info)
+	}
+	r = e.expect(e.put(l.Token, "f.jpg", strings.NewReader("f")), http.StatusRequestEntityTooLarge)
+	wantBody(t, r, "This upload link is full.")
+
+	// An upload that doesn't finish makes no folder.
+	other := e.createLink(nil)
+	var started struct{ ID string }
+	e.expect(e.sendJSON(b, http.MethodPost, "/api/public/d/"+other.Token+"/uploads", map[string]any{"path": "Never", "name": "x", "size": 4}), http.StatusCreated).decode(t, &started)
+	e.expect(e.send(b, http.MethodDelete, "/api/public/d/"+other.Token+"/uploads/"+started.ID, nil), http.StatusNoContent)
+	if got := e.listing(other.Folder); got != "" {
+		t.Errorf("a cancelled upload left %q in the link's folder", got)
+	}
+	e.checkNothingReserved()
+}

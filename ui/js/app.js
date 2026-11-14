@@ -2,8 +2,8 @@
 
 const {
   html, raw, b, icon, bytes, rel, date, kindOf, thumb, previewMedia,
-  snippetTabs, uploadSnippets, shareSnippets, toast, delegate, hydrateIcons,
-  uploadRow, updateUploadRow, dropZone, slug, qrSvg, downloadQr,
+  snippetTabs, uploadSnippets, shareSnippets, toast, copy, delegate, hydrateIcons,
+  uploadRow, updateUploadRow, dropZone, pickedFiles, droppedFiles, slug, qrSvg, downloadQr,
 } = window.StashUI;
 const { store, uploadUrl, shareUrl, MB, GB, TB } = window.StashData;
 const { request, uploadFile } = window.StashAPI;
@@ -137,10 +137,12 @@ function confirmModal({ title, body, confirm, onConfirm }) {
 function linkPanel(url, name, snippets, previewHref) {
   return html`<div class="link-panel">
     <div class="linkbox">
-      <input class="input mono" readonly value="${url}" aria-label="Link" data-action="select-text">
+      <div class="link-field">
+        <input class="input mono" readonly value="${url}" aria-label="Link, click to copy" title="Click to copy" data-action="copy-link">
+        <button type="button" class="icon-btn btn-ghost" data-action="copy-link" aria-label="Copy link" title="Copy link">${icon('copy')}</button>
+      </div>
       <div class="linkbox-actions">
-        <button type="button" class="btn" data-action="copy" data-text="${url}" data-msg="Link copied">${icon('copy')} Copy link</button>
-        <button type="button" class="btn btn-ghost" data-action="toggle-qr" aria-expanded="false" title="Show the link as a QR code, to open it on a phone or print it">${icon('qr')} QR code</button>
+        <button type="button" class="btn" data-action="toggle-qr" aria-expanded="false" title="Show the link as a QR code, to open it on a phone or print it">${icon('qr')}<span data-qr-label>Show QR code</span>${icon('chevron-down', 'chev')}</button>
         <a class="btn btn-ghost" href="${previewHref}" target="_blank" rel="noopener" title="Open the page the recipient sees">${icon('external')} Preview</a>
       </div>
     </div>
@@ -185,14 +187,15 @@ function filesView(folderId) {
       </div>
       <div class="actions">
         <button type="button" class="btn" data-action="new-folder">${icon('plus')} New folder</button>
+        ${folder.id !== 'root' ? html`<button type="button" class="btn" data-action="share-folder" data-id="${folder.id}" title="Make a share link for this folder and everything in it">${icon('link')} Share folder</button>` : ''}
         ${layoutToggle()}
       </div>
     </div>
     ${kids.length
-      ? html`${dropZone({ compact: true, title: `Drag files here to upload them to ${folder.name}`, hint: 'Or drop them anywhere on this page. As many files as you like.', button: 'Upload files' })}
+      ? html`${dropZone({ compact: true, title: `Drag files or folders here to upload them to ${folder.name}`, hint: 'Or drop them anywhere on this page. As many as you like.', button: 'Upload files', folderButton: 'Upload folder' })}
              ${selectionBar()}
              ${itemsView(kids)}`
-      : dropZone({ title: 'This folder is empty', hint: `Drag files here to upload them to ${folder.name}.`, button: 'Upload files' })}`;
+      : dropZone({ title: 'This folder is empty', hint: `Drag files or folders here to upload them to ${folder.name}.`, button: 'Upload files', folderButton: 'Upload folder' })}`;
 }
 
 const layoutToggle = () => html`<div class="seg" role="group" aria-label="Layout">
@@ -328,7 +331,9 @@ function itemMenu(it) {
     <button type="button" role="menuitem" data-action="open" data-id="${it.id}">${icon(file ? 'eye' : 'folder')}${file ? 'Preview' : 'Open'}</button>
     ${file ? html`<a role="menuitem" href="${store.contentUrl(it.id)}?download" download>${icon('download')}Download</a>` : ''}
     <button type="button" role="menuitem" data-action="rename" data-id="${it.id}" ${fixed ? raw('disabled') : ''}>${icon('pencil')}Rename…</button>
-    ${file ? html`<button type="button" role="menuitem" data-action="share-files" data-ids="${it.id}">${icon('link')}Create share link…</button>` : ''}
+    ${file
+      ? html`<button type="button" role="menuitem" data-action="share-files" data-ids="${it.id}">${icon('link')}Create share link…</button>`
+      : html`<button type="button" role="menuitem" data-action="share-folder" data-id="${it.id}">${icon('link')}Share folder…</button>`}
     <div role="separator"></div>
     <button type="button" role="menuitem" class="danger" data-action="delete" data-ids="${it.id}" ${fixed ? raw('disabled') : ''}>${icon('trash')}Delete…</button>
     ${fixed ? html`<p class="menu-note">Stash keeps your upload links’ folders here, so this folder can’t be renamed or deleted.</p>` : ''}`;
@@ -389,28 +394,34 @@ function renameForm(id, reopen = false) {
 
 // Each file gets its own row and progress bar in a panel in the bottom-right corner, and appears
 // in its folder once it's uploaded. The server checks the free space, so a file that doesn't fit
-// shows that message in its row.
+// shows that message in its row. Files of an uploaded folder go up one by one too, each with the
+// folder it was in; the server makes the folders as the files arrive.
 
 const tray = $('#tray');
 const uploads = [];
 let uploadSeq = 0;
 let trayCollapsed = false;
 
-function addOwnerFiles(fileList) {
-  const list = [...fileList];
-  if (!list.length) return;
-  const { section } = route();
-  const target = section === 'files' && !state.query ? state.folder : 'root';
-  for (const file of list) {
-    const u = { id: ++uploadSeq, name: file.name, size: file.size, loaded: 0, status: 'uploading' };
+/** The folder that files dropped or picked now go to. */
+const uploadTarget = () => (route().section === 'files' && !state.query ? state.folder : 'root');
+
+/** Starts uploading files from pickedFiles or droppedFiles into a folder. */
+function addOwnerFiles(files, target = uploadTarget()) {
+  if (!files.length) return;
+  for (const { file, path, name, error } of files) {
+    const u = { id: ++uploadSeq, name: file?.name ?? name, path, size: file?.size ?? 0, loaded: 0, status: 'uploading' };
     uploads.unshift(u);
+    if (error) {
+      Object.assign(u, { status: 'error', error });
+      continue;
+    }
     u.job = uploadFile(file, {
       base: '/api/uploads',
-      fields: { parent: target },
+      fields: { parent: target, path },
       onProgress: (n) => { u.loaded = n; updateUploadRow(tray, u); },
     });
     u.job.done.then((item) => {
-      Object.assign(u, { status: 'done', loaded: u.size, doneText: `${bytes(item.size)} · in ${store.item(item.parent)?.name ?? 'My files'}` });
+      Object.assign(u, { status: 'done', loaded: u.size, parent: item.parent });
       refresh();
     }, (err) => {
       if (err.status === -1) return; // cancelled, and the row is already gone
@@ -451,6 +462,11 @@ function renderTray() {
   const busy = uploads.filter((u) => u.status === 'uploading').length;
   const done = uploads.filter((u) => u.status === 'done').length;
   const failed = uploads.length - busy - done;
+  // A folder that came with an upload is only known once everything is loaded again.
+  for (const u of uploads) {
+    const folder = u.status === 'done' && store.item(u.parent);
+    if (folder) u.doneText = `${bytes(u.size)} · in ${folder.name}`;
+  }
   const title = [
     busy ? `Uploading ${plural(busy, 'file')}` : `${plural(done, 'upload')} complete`,
     busy && done ? `${done} done` : '',
@@ -765,7 +781,7 @@ function shareList() {
   const all = store.shares();
   return html`
     <div class="page-head">
-      <div><h1>Share links</h1><p>Send someone a set of files. They can view and download only what you picked.</p></div>
+      <div><h1>Share links</h1><p>Send someone files or a folder. They can view and download only what you shared.</p></div>
       <button type="button" class="btn btn-primary" data-action="new-share">${icon('plus')} New share link</button>
     </div>
     ${all.length ? html`<div class="table rows-shares">
@@ -776,8 +792,9 @@ function shareList() {
 
 function shareRow(s) {
   const files = store.shareFiles(s);
+  const folder = s.folder && store.item(s.folder);
   return html`<div class="row link" role="button" tabindex="0" data-action="go" data-href="#/share-links/${s.id}">
-    <span class="name-cell"><span class="stack-thumbs">${files.slice(0, 3).map((f) => html`<span class="mini">${thumb(f)}</span>`)}</span><span class="min0 stack"><span class="ellipsis strong">${s.name}</span><span class="ellipsis muted small">${s.password ? 'Password · ' : ''}Created ${rel(s.created)}</span></span></span>
+    <span class="name-cell"><span class="stack-thumbs">${(folder ? [folder] : files.slice(0, 3)).map((f) => html`<span class="mini">${thumb(f)}</span>`)}</span><span class="min0 stack"><span class="ellipsis strong">${s.name}</span><span class="ellipsis muted small">${folder ? `Folder ${folder.name} · ` : ''}${s.password ? 'Password · ' : ''}Created ${rel(s.created)}</span></span></span>
     <span class="muted"><span class="m-label">Files: </span>${files.length} · ${bytes(total(files))}</span>
     <span class="muted"><span class="m-label">Downloads: </span>${s.downloads}${s.maxDownloads ? ` / ${s.maxDownloads}` : ''}</span>
     <span class="muted"><span class="m-label">Expires: </span>${expiresText(s.expires)}</span>
@@ -815,10 +832,20 @@ function shareDetail(id) {
     ${s.message ? html`<div class="card note"><div class="stat-label">Message shown to visitors</div><p>${s.message}</p></div>` : ''}
     ${status === 'active' ? html`<section class="section"><h2>Send this link</h2><div class="card">${linkPanel(url, s.name, shareSnippets(url, s), `/s/${s.token}`)}</div></section>` : ''}
     <section class="section">
-      <h2>Files in this share</h2>
-      ${trashedFiles ? html`<p class="hint section-hint">${trashedFiles === 1 ? '1 file is' : `${trashedFiles} files are`} in the <a href="#/trash">trash</a>, so visitors don’t see ${trashedFiles === 1 ? 'it' : 'them'}. Restore ${trashedFiles === 1 ? 'it' : 'them'} to share ${trashedFiles === 1 ? 'it' : 'them'} again.</p>` : ''}
-      ${files.length ? html`<div class="grid">${files.map((f) => tile(f, false))}</div>` : html`<div class="card empty">${icon('file')}<p>All files in this share were deleted.</p></div>`}
+      ${s.folder ? sharedFolder(store.item(s.folder)) : html`
+        <h2>Files in this share</h2>
+        ${trashedFiles ? html`<p class="hint section-hint">${trashedFiles === 1 ? '1 file is' : `${trashedFiles} files are`} in the <a href="#/trash">trash</a>, so visitors don’t see ${trashedFiles === 1 ? 'it' : 'them'}. Restore ${trashedFiles === 1 ? 'it' : 'them'} to share ${trashedFiles === 1 ? 'it' : 'them'} again.</p>` : ''}
+        ${files.length ? html`<div class="grid">${files.map((f) => tile(f, false))}</div>` : html`<div class="card empty">${icon('file')}<p>All files in this share were deleted.</p></div>`}`}
     </section>`;
+}
+
+function sharedFolder(folder) {
+  const head = html`<h2>Shared folder</h2>`;
+  if (!folder) return html`${head}<div class="card empty">${icon('folder')}<p>The shared folder was deleted, so visitors see nothing.</p></div>`;
+  if (store.inTrash(folder.id)) return html`${head}<div class="card empty">${icon('trash')}<p>${folder.name} is in the <a href="#/trash">trash</a>, so visitors see nothing. Restore it to share it again.</p></div>`;
+  return html`${head}
+    <p class="hint section-hint">Visitors see everything in ${folder.name}, also in the folders inside it, and files you add to it later.</p>
+    <div class="grid">${tile(folder, false)}</div>`;
 }
 
 function defaultShareName(ids) {
@@ -831,29 +858,19 @@ function defaultShareName(ids) {
 
 const pickLabel = (n, size) => (n ? `· ${n} selected, ${bytes(size)}` : '· none selected');
 
-function shareForm(ids = []) {
-  const chosen = new Set(ids);
-  const all = store.files();
-  const list = [...all.filter((f) => chosen.has(f.id)), ...all.filter((f) => !chosen.has(f.id)).sort((a, b) => a.name.localeCompare(b.name))];
-  const name = defaultShareName(ids);
-  showModal(html`<form data-submit="save-share">
-    ${modalHead('New share link')}
+/** The form for a new share link: for files, picked in the form, or for one folder. */
+function shareForm(ids = [], folderId = '') {
+  const folder = folderId && store.item(folderId);
+  const name = folder ? folder.name : defaultShareName(ids);
+  showModal(html`<form data-submit="save-share" data-folder="${folder ? folder.id : ''}">
+    ${modalHead(folder ? 'Share a folder' : 'New share link')}
     <div class="modal-body">
       <div class="field">
         <label for="s-name">Name</label>
         <input id="s-name" name="name" class="input" required maxlength="120" value="${name}" placeholder="e.g. Photos from Saturday" autofocus>
         <p class="hint">Shown as the title on the download page.</p>
       </div>
-      <fieldset class="field picker">
-        <legend>Files <span class="muted" data-pick-count>${pickLabel(chosen.size, total(all.filter((f) => chosen.has(f.id))))}</span></legend>
-        <input type="search" class="input" placeholder="Filter files" data-filter="pick" aria-label="Filter files">
-        <div class="pick-list">${list.map((f) => html`<label class="pick" data-name="${f.name.toLowerCase()}">
-          <input type="checkbox" name="files" value="${f.id}" ${chosen.has(f.id) ? raw('checked') : ''}>
-          <span class="mini">${thumb(f)}</span>
-          <span class="min0 stack"><span class="ellipsis">${f.name}</span><span class="ellipsis muted small">${pathText(f.parent)}</span></span>
-          <span class="muted small nowrap">${bytes(f.size)}</span>
-        </label>`)}</div>
-      </fieldset>
+      ${folder ? folderField(folder) : filePicker(ids)}
       <div class="two">
         <div class="field"><label for="s-exp">Expires</label>${expirySelect('s-exp', { fallback: 30 })}</div>
         <div class="field"><label for="s-max">Max downloads <span class="muted">· optional</span></label><input id="s-max" name="maxDownloads" type="number" min="1" step="1" class="input" placeholder="No limit"><p class="hint">Every file viewed or downloaded counts. A limited share shows no previews.</p></div>
@@ -863,6 +880,35 @@ function shareForm(ids = []) {
     </div>
     <div class="modal-foot"><button type="button" class="btn" data-action="close-modal">Cancel</button><button type="submit" class="btn btn-primary">Create link</button></div>
   </form>`);
+}
+
+function filePicker(ids) {
+  const chosen = new Set(ids);
+  const all = store.files();
+  const list = [...all.filter((f) => chosen.has(f.id)), ...all.filter((f) => !chosen.has(f.id)).sort((a, b) => a.name.localeCompare(b.name))];
+  return html`<fieldset class="field picker">
+    <legend>Files <span class="muted" data-pick-count>${pickLabel(chosen.size, total(all.filter((f) => chosen.has(f.id))))}</span></legend>
+    <div class="input-icon">${icon('search')}<input type="search" class="input" placeholder="Filter files" data-filter="pick" aria-label="Filter files"></div>
+    <div class="pick-list">${list.map((f) => html`<label class="pick" data-name="${f.name.toLowerCase()}">
+      <input type="checkbox" name="files" value="${f.id}" ${chosen.has(f.id) ? raw('checked') : ''}>
+      <span class="mini">${thumb(f)}</span>
+      <span class="min0 stack"><span class="ellipsis">${f.name}</span><span class="ellipsis muted small">${pathText(f.parent)}</span></span>
+      <span class="muted small nowrap">${bytes(f.size)}</span>
+    </label>`)}</div>
+  </fieldset>`;
+}
+
+function folderField(folder) {
+  const files = store.shareFiles({ folder: folder.id });
+  return html`<div class="field">
+    <span class="label">Folder</span>
+    <div class="pick shared-folder">
+      <span class="mini">${thumb(folder)}</span>
+      <span class="min0 stack"><span class="ellipsis">${folder.name}</span><span class="ellipsis muted small">${pathText(folder.parent)}</span></span>
+      <span class="muted small nowrap">${plural(files.length, 'file')}, ${bytes(total(files))}</span>
+    </div>
+    <p class="hint">Everything in it is shared, also in the folders inside it. Files you add to it later are shared too.</p>
+  </div>`;
 }
 
 function showCreatedShare(s) {
@@ -923,13 +969,20 @@ const actions = {
   },
   'share-files': (el) => shareForm(el.dataset.ids.split(',')),
   'share-selected': () => shareForm([...state.selected]),
+  'share-folder': (el) => shareForm([], el.dataset.id),
   delete: (el) => confirmDelete(el.dataset.ids.split(',')),
   'delete-selected': () => confirmDelete([...state.selected]),
   'close-modal': () => modal.close(),
+  // A click anywhere on the link copies it, and selects it to show what was copied.
+  'copy-link': (el) => {
+    const input = el.closest('.link-field').querySelector('input');
+    copy(input.value, 'Link copied').then(() => input.select());
+  },
   'toggle-qr': (el) => {
     const panel = el.closest('.link-panel').querySelector('[data-qr]');
     panel.hidden = !panel.hidden;
     el.setAttribute('aria-expanded', b(!panel.hidden));
+    el.querySelector('[data-qr-label]').textContent = panel.hidden ? 'Show QR code' : 'Hide QR code';
   },
   'download-qr': (el) => downloadQr(el.dataset.url, `${slug(el.dataset.name)}-qr-code.png`),
   confirm: () => {
@@ -1000,8 +1053,9 @@ const submits = {
   },
   'save-share': async (form) => {
     const f = form.elements;
+    const { folder } = form.dataset;
     const ids = [...form.querySelectorAll('input[name=files]:checked')].map((i) => i.value);
-    if (!ids.length) {
+    if (!folder && !ids.length) {
       form.querySelector('.picker').classList.add('invalid');
       toast('Pick at least one file', 'alert');
       return;
@@ -1009,7 +1063,7 @@ const submits = {
     setBusy(form, true);
     const s = await attempt(() => store.createShare({
       name: f.name.value.trim(),
-      files: ids,
+      ...(folder ? { folder } : { files: ids }),
       expiresDays: Number(f.expires.value),
       maxDownloads: Number(f.maxDownloads.value) || 0,
       password: passwordChange(f),
@@ -1112,10 +1166,10 @@ document.addEventListener('input', (e) => {
   e.target.closest('.picker').querySelectorAll('.pick').forEach((el) => { el.hidden = Boolean(q) && !el.dataset.name.includes(q); });
 });
 
-// Upload with the drop area's button, or by dropping files anywhere on a folder's page.
+// Upload with the drop area's buttons, or by dropping files and folders anywhere on a folder's page.
 document.addEventListener('change', (e) => {
   if (!e.target.matches('[data-file-input]')) return;
-  addOwnerFiles(e.target.files);
+  addOwnerFiles(pickedFiles(e.target));
   e.target.value = '';
 });
 
@@ -1136,9 +1190,13 @@ document.addEventListener('dragleave', (e) => {
 });
 document.addEventListener('drop', (e) => {
   document.body.classList.remove('dropping');
-  if (!e.dataTransfer?.files.length) return;
+  if (!e.dataTransfer?.types.includes('Files')) return;
   e.preventDefault();
-  if (canDropHere()) addOwnerFiles(e.dataTransfer.files);
+  if (!canDropHere()) return;
+  // Reading dropped folders takes a moment: the files go where they were dropped, even if the
+  // owner opens another folder meanwhile.
+  const target = uploadTarget();
+  droppedFiles(e.dataTransfer).then((files) => addOwnerFiles(files, target));
 });
 
 

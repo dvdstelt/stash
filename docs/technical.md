@@ -11,7 +11,7 @@ Stash is a single Go program that uses only the standard library. It serves:
 - **Upload link pages** (`/d/<token>`), where anyone with the link can add files to one folder,
   within that link's limits.
 - **Share link pages** (`/s/<token>`), where anyone with the link can view and download a chosen set
-  of files.
+  of files, or everything in one folder.
 - **A plain HTTP interface** for the command line: `PUT /d/<token>/<name>` uploads a file, and
   `GET` on a link without `Accept: text/html` prints instructions for a terminal.
 
@@ -212,10 +212,12 @@ Some limits to know:
 
 **Uploaded files.**
 - Files are stored under random IDs. Names are cleaned: only the last path element, no control
-  characters, at most 255 bytes.
+  characters, at most 255 bytes. The folder path of an uploaded folder is cleaned the same way,
+  element by element, and only names folders inside the upload's own folder.
 - Only a short list of types opens in the browser: images, PDF, MP4/WebM/QuickTime video, and text.
   They're served with a fixed `Content-Type`, `X-Content-Type-Options: nosniff`, and a sandboxing
-  `Content-Security-Policy`, except PDFs, which the browser's viewer can't show sandboxed.
+  `Content-Security-Policy`, except PDFs, which the browser's viewer can't show sandboxed. So a PDF
+  received through an upload link is always a download, also in a folder that came with it.
 - Everything else, including HTML and SVG, is served as a download (`application/octet-stream`,
   `Content-Disposition: attachment`).
 
@@ -241,7 +243,8 @@ back with it.
 
 - **Out of sight.** Items in the trash don't show in folders or search, can't be added to a new
   share link, and can't receive uploads. Share links leave out their files in the trash, on the page,
-  in the zip and on the command line, until the owner restores them.
+  in the zip and on the command line, until the owner restores them. For a shared folder, that's
+  whatever is in the trash inside it, or everything while the folder itself is.
 - **Upload links.** Deleting an upload link's folder revokes the link, so nobody uploads into the
   trash. Restoring the folder leaves the link revoked; the owner reopens it when they want to. A link
   can't be reopened while its folder is in the trash.
@@ -260,7 +263,8 @@ back with it.
 ### From the browser: resumable chunks
 
 1. `POST .../uploads` with `{"name", "size"}` checks the limits, sets the space aside, and returns an
-   upload `id`.
+   upload `id`. A file from an uploaded folder also sends `path`: the folder it was in, such as
+   `Trip/Day 1` (see [Folders](#folders)).
 2. `PUT .../uploads/<id>?offset=N` sends the bytes from position N, normally 32 MB at a time. The
    answer is `{"received"}`, or `{"done": true, "item"}` after the last byte.
 3. If a chunk fails halfway, the page asks `GET .../uploads/<id>` how much arrived and continues
@@ -269,6 +273,31 @@ back with it.
 
 For the owner the base path is `/api/uploads`, with `parent` (a folder ID) in the start request. For
 upload links it's `/api/public/d/<token>/uploads`.
+
+### Folders
+
+A folder is uploaded one file at a time, each with its `path`. The pages read a dropped folder with
+`webkitGetAsEntry()`, because `dataTransfer.files` only holds the folder itself, which can't be
+read. The **Upload folder** button is an `<input type="file" webkitdirectory>`, since one dialog
+can't pick files and folders at once; touch screens don't get it, because they can't pick folders.
+Empty folders are left out: there's no file to bring them along.
+
+Strangers can't make folders, so the server makes them, inside `parent` or the link's folder:
+
+- **Cleaned element by element.** `/` and `\` both separate folders. Each element is cleaned like a
+  file name, and elements without a usable name (empty, `.` or `..`) are left out. The elements are
+  only names to look up or make, so a path can't lead out of the upload's folder. At most 64
+  folders inside each other.
+- **Made when the file is done**, not when the upload starts. An upload that fails or is cancelled
+  leaves no empty folder, and a stranger can only make folders by sending files, within the link's
+  limits.
+- **Added to, not numbered.** A folder with the same name, ignoring case, gets the file, so
+  uploading `Trip` twice fills one `Trip`, as does every file of one upload. Folders in the trash
+  don't count: the file gets a new folder. Only when a *file* has the name does the folder become
+  `name (2)`, or the first such name that's a folder or still free, so all files still land in the
+  same one.
+- **Counted on the link.** An upload link's size and file limits count the files in its folder and
+  in every folder below it, leaving out what's in the trash.
 
 ### From the command line: one request
 
@@ -307,8 +336,12 @@ status 200. That's 200 rather than 201, because wget2 doesn't print the reply of
 | `POST /api/shares`, `PATCH /api/shares/<id>` | Create or change a share link |
 
 Link fields: `name`, `quota` (bytes), `maxFiles`, `expiresDays` (0 means never), `password` (an
-empty string removes it), `message`, `revoked`. Share links use `files` (IDs, only when creating)
-and `maxDownloads` instead of `quota` and `maxFiles`.
+empty string removes it), `message`, `revoked`. Share links use `maxDownloads` instead of `quota`
+and `maxFiles`, and either `files` (IDs) or `folder` (one folder ID), only when creating.
+
+A share link with `files` offers exactly those files. One with `folder` offers what's in that folder
+at the moment someone looks, subfolders included, so files the owner adds later are shared too. "My
+files" itself can't be shared, because it holds every upload link's folder.
 
 **Upload links** (`<token>` from the link):
 
@@ -325,10 +358,10 @@ and `maxDownloads` instead of `quota` and `maxFiles`.
 | Method and path | Purpose |
 |---|---|
 | `GET /s/<token>` | The share page, or download commands for a terminal |
-| `GET /api/public/s/<token>` | Status and file list, or `locked` |
+| `GET /api/public/s/<token>` | Status and file list, or `locked`. In a shared folder, each file has a `path`: the subfolder it's in, such as `Day 1/Morning`. |
 | `POST /api/public/s/<token>/unlock` | `{password}` |
 | `GET /s/<token>/files/<id>` | One file. Add `?download` to download it instead of opening it. Counts as one download. |
-| `GET /s/<token>/all.zip` | All files as one zip, stored uncompressed. Counts as one download. |
+| `GET /s/<token>/all.zip` | All files as one zip, stored uncompressed, with a shared folder's subfolders. Counts as one download. |
 
 `HEAD` on a file or the zip doesn't count as a download, because it sends no contents. Checking a
 link with `curl -I`, or a link scanner in a mail app doing so, doesn't use up a share's downloads.
@@ -344,6 +377,7 @@ Resuming doesn't count either, from the browser that started the download (see
 - Resuming a share download from the command line (`curl -C -` without a cookie jar) counts as a
   new download, and so does resuming after Stash restarts.
 - Files and folders can't be moved to another folder yet.
+- The command line uploads single files, into the link's folder. A folder has to be zipped first.
 - The tests cover the server, not the page scripts. See [Checking changes](#checking-changes).
 
 ## Development
@@ -419,12 +453,16 @@ The tests don't cover the page scripts. After changing those, check by hand:
 
 1. Start with an empty data folder, set the password with the printed link, and sign in.
 2. Upload several files at once in the browser, including one larger than 32 MB.
-3. Create an upload link with a small limit and a password, and upload through its page.
-4. Create a share link, open it, and download one file and the zip.
-5. Show a link's QR code, scan it with a phone, and download the image.
-6. Delete a shared file and a folder from their menu. Check that the share page leaves the file
+3. Drop a folder with a subfolder onto a folder's page, and pick one with **Upload folder**. Drop
+   the same folder again, and check that its files land in the folders already there.
+4. Create an upload link with a small limit and a password, and upload through its page, also a
+   folder. Check that the link's page in My files counts the files in its subfolders.
+5. Create a share link, open it, and download one file and the zip. Share a folder with a
+   subfolder, add a file to it, and check that the share page shows it under the subfolder's name.
+6. Show a link's QR code, scan it with a phone, and download the image.
+7. Delete a shared file and a folder from their menu. Check that the share page leaves the file
    out, restore both from the Trash, and empty the trash.
-7. Look at the browser console for errors.
+8. Look at the browser console for errors.
 
 [AGENTS.md](../AGENTS.md) lists the conventions and the security rules changes must keep.
 

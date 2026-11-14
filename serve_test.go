@@ -75,6 +75,27 @@ func TestServeFileOpensOnlySafeKinds(t *testing.T) {
 	}
 }
 
+// A PDF in a folder a stranger uploaded is as much theirs as one at the top of the link's folder,
+// so it downloads too, for the owner and on a share link.
+func TestPDFInAnUploadedFolderDownloads(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	l := e.createLink(nil)
+	f := e.uploadThrough(newBrowser(), l.Token, "Trip/Day 1", "theirs.pdf", "%PDF")
+	s := e.createShare(nil, f)
+	for _, path := range []string{"/api/files/" + f.ID + "/content", e.fileURL(s, f)} {
+		r := e.expect(e.send(e.owner, http.MethodGet, path, nil), http.StatusOK)
+		if r.header.Get("Content-Type") != "application/octet-stream" || !strings.HasPrefix(r.header.Get("Content-Disposition"), "attachment") {
+			t.Errorf("%s: %q, %q; want a download", path, r.header.Get("Content-Type"), r.header.Get("Content-Disposition"))
+		}
+	}
+	var info shareInfo
+	e.expect(e.get("/api/public/s/"+s.Token), http.StatusOK).decode(t, &info)
+	if len(info.Files) != 1 || !info.Files[0].NoPreview {
+		t.Errorf("files = %+v; want theirs.pdf as a download", info.Files)
+	}
+}
+
 // File names go into a header. Quotes, line breaks and non-ASCII letters can't break out of it.
 func TestServeFileNameInHeader(t *testing.T) {
 	t.Parallel()

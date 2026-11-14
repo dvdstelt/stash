@@ -47,12 +47,14 @@ type Link struct {
 	Revoked      bool   `json:"revoked,omitempty"`
 }
 
-// Share is a share link: anyone with its token can view and download the files in it.
+// Share is a share link: anyone with its token can view and download the files in it. It holds
+// either a fixed list of files, or one folder with everything in it, also what's added later.
 type Share struct {
 	ID           string   `json:"id"`
 	Token        string   `json:"token"`
 	Name         string   `json:"name"`
 	Files        []string `json:"files"`
+	Folder       string   `json:"folder,omitempty"`
 	Created      int64    `json:"created"`
 	Expires      int64    `json:"expires,omitempty"`
 	MaxDownloads int      `json:"maxDownloads,omitempty"`
@@ -264,7 +266,16 @@ func (st *store) uniqueName(parent, name string) string {
 	for _, it := range st.liveChildren(parent) {
 		taken[strings.ToLower(it.Name)] = true
 	}
-	if !taken[strings.ToLower(name)] {
+	for n := 1; ; n++ {
+		if candidate := numbered(name, n); !taken[strings.ToLower(candidate)] {
+			return candidate
+		}
+	}
+}
+
+// numbered returns name for n = 1, and "name (n).ext" after that.
+func numbered(name string, n int) string {
+	if n < 2 {
 		return name
 	}
 	ext := filepath.Ext(name)
@@ -272,10 +283,30 @@ func (st *store) uniqueName(parent, name string) string {
 	if ext == name { // ".bashrc" has no base name
 		base, ext = name, ""
 	}
-	for n := 2; ; n++ {
-		candidate := fmt.Sprintf("%s (%d)%s", base, n, ext)
-		if !taken[strings.ToLower(candidate)] {
-			return candidate
+	return fmt.Sprintf("%s (%d)%s", base, n, ext)
+}
+
+// subfolder finds the folder called name in parent, or makes it, so files uploaded with the same
+// folder path end up together. An uploaded folder adds to a folder of the same name rather than
+// becoming "name (2)". Only when a file has that name does it go to "name (2)", or the first
+// such name that's a folder or still free, which is the same one for every file. Hold mu.
+func (st *store) subfolder(parent, name string) *Item {
+	kids := st.liveChildren(parent)
+	for n := 1; ; n++ {
+		candidate := numbered(name, n)
+		taken := false
+		for _, it := range kids {
+			if strings.EqualFold(it.Name, candidate) {
+				if it.Type == "folder" {
+					return it
+				}
+				taken = true
+			}
+		}
+		if !taken {
+			it := &Item{ID: newID(), Type: "folder", Parent: parent, Name: candidate, Modified: nowMillis()}
+			st.items[it.ID] = it
+			return it
 		}
 	}
 }
@@ -325,6 +356,17 @@ func (st *store) linkByFolder(folder string) *Link {
 	return nil
 }
 
+// underLink says whether folder is an upload link's folder, or in one: whether strangers may have
+// put what's in it there. Hold mu.
+func (st *store) underLink(folder string) bool {
+	for it := st.items[folder]; it != nil; it = st.items[it.Parent] {
+		if st.linkByFolder(it.ID) != nil {
+			return true
+		}
+	}
+	return false
+}
+
 func (st *store) shareByToken(token string) *Share {
 	for _, s := range st.shares {
 		if tokenEqual(s.Token, token) {
@@ -343,16 +385,36 @@ func (st *store) shareByID(id string) *Share {
 	return nil
 }
 
-// linkUsage is the space used by, and the number of, files already received through a link.
-// Files the owner deleted don't count, so deleting them makes room on the link again.
+// linkUsage is the space used by, and the number of, files already received through a link,
+// including those in folders that were uploaded. Files the owner deleted don't count, so deleting
+// them makes room on the link again.
 func (st *store) linkUsage(l *Link) (used int64, files int) {
-	for _, it := range st.liveChildren(l.Folder) {
-		if it.Type == "file" {
-			used += it.Size
-			files++
+	kids := st.liveKids()
+	var walk func(folder string)
+	walk = func(folder string) {
+		for _, it := range kids[folder] {
+			if it.Type == "file" {
+				used += it.Size
+				files++
+			} else {
+				walk(it.ID)
+			}
 		}
 	}
+	walk(l.Folder)
 	return used, files
+}
+
+// liveKids lists what's in each folder, leaving out what's in the trash. One pass over all items,
+// rather than one per folder, keeps walking large trees quick.
+func (st *store) liveKids() map[string][]*Item {
+	kids := map[string][]*Item{}
+	for _, it := range st.items {
+		if it.Trashed == 0 {
+			kids[it.Parent] = append(kids[it.Parent], it)
+		}
+	}
+	return kids
 }
 
 func (st *store) usedBytes() int64 {
@@ -373,6 +435,59 @@ func linkStatus(l *Link, used int64, files int) string {
 		return "full"
 	}
 	return "active"
+}
+
+// sharedFile is a file a share link offers, with the folder it's in relative to the shared
+// folder, such as "Day 1/Morning". Path is "" for a file at the top, and for every file of a
+// share that holds a list of files.
+type sharedFile struct {
+	Item
+	Path string
+}
+
+// shareContents returns the files a share link offers. Files in the trash are left out: they're
+// only the owner's to see. A shared folder offers what's in it now, subfolders included: the
+// files at the top first, then each subfolder in name order. Hold mu.
+func (st *store) shareContents(s *Share) []sharedFile {
+	var out []sharedFile
+	if s.Folder == "" {
+		for _, id := range s.Files {
+			if it := st.items[id]; it != nil && !st.inTrash(id) {
+				out = append(out, sharedFile{Item: *it})
+			}
+		}
+		return out
+	}
+	if st.items[s.Folder] == nil || st.inTrash(s.Folder) {
+		return nil
+	}
+	kids := st.liveKids()
+	var walk func(folder, path string)
+	walk = func(folder, path string) {
+		list := kids[folder]
+		slices.SortFunc(list, func(a, b *Item) int { return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)) })
+		for _, it := range list {
+			if it.Type == "file" {
+				out = append(out, sharedFile{*it, path})
+			}
+		}
+		for _, it := range list {
+			if it.Type == "folder" {
+				walk(it.ID, joinPath(path, it.Name))
+			}
+		}
+	}
+	walk(s.Folder, "")
+	return out
+}
+
+// joinPath puts a name after a folder path. Names never contain a slash: cleanName and renaming
+// see to that.
+func joinPath(path, name string) string {
+	if path == "" {
+		return name
+	}
+	return path + "/" + name
 }
 
 func shareStatus(s *Share) string {
@@ -424,4 +539,24 @@ func cleanName(name string) (string, error) {
 		return "", errors.New("the file needs a name")
 	}
 	return name, nil
+}
+
+// maxFolderDepth is how many folders inside each other an upload may bring along.
+const maxFolderDepth = 64
+
+// cleanPath turns the folder path of an uploaded file, such as "Trip/Day 1", into folder names.
+// Each element is cleaned like a file name, and elements without a usable name ("", "." and "..")
+// are left out. The folders are only names to look up or make inside the upload's folder, so a
+// path can never lead out of it.
+func cleanPath(path string) ([]string, error) {
+	var out []string
+	for _, part := range strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if name, err := cleanName(part); err == nil {
+			out = append(out, name)
+		}
+	}
+	if len(out) > maxFolderDepth {
+		return nil, fmt.Errorf("The folders are nested too deeply: at most %d inside each other.", maxFolderDepth)
+	}
+	return out, nil
 }

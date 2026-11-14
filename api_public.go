@@ -120,8 +120,8 @@ func (srv *server) handlePublicUploadStart(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var in struct {
-		Name string
-		Size int64
+		Name, Path string
+		Size       int64
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -130,7 +130,7 @@ func (srv *server) handlePublicUploadStart(w http.ResponseWriter, r *http.Reques
 		jsonError(w, http.StatusBadRequest, "The size can't be negative.")
 		return
 	}
-	u, err := srv.startUpload(in.Name, l.Folder, l, in.Size)
+	u, err := srv.startUpload(in.Name, in.Path, l.Folder, l, in.Size)
 	if err != nil {
 		status, msg := errorStatus(err)
 		jsonError(w, status, msg)
@@ -177,16 +177,10 @@ func (srv *server) shareFor(r *http.Request) (s Share, status string) {
 
 // shareFiles returns the files of a share that can be downloaded: the owner may have deleted some
 // since, and files in the trash are only theirs to see.
-func (srv *server) shareFiles(s *Share) []Item {
+func (srv *server) shareFiles(s *Share) []sharedFile {
 	srv.st.mu.Lock()
 	defer srv.st.mu.Unlock()
-	var out []Item
-	for _, id := range s.Files {
-		if it := srv.st.items[id]; it != nil && !srv.st.inTrash(id) {
-			out = append(out, *it)
-		}
-	}
-	return out
+	return srv.st.shareContents(s)
 }
 
 func (srv *server) handleSharePage(w http.ResponseWriter, r *http.Request) {
@@ -201,8 +195,8 @@ func (srv *server) handleSharePage(w http.ResponseWriter, r *http.Request) {
 	base := srv.origin(r) + "/s/" + r.PathValue("token")
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n\nDownload everything as one zip file:\n  curl -L -o %s.zip %s/all.zip\n\nOr one file at a time:\n", s.Name, slugify(s.Name), base)
-	for _, it := range srv.shareFiles(&s) {
-		fmt.Fprintf(&b, "  %s (%s)\n    curl -L -o %s '%s/files/%s?download'\n", it.Name, formatBytes(it.Size), shellQuote(it.Name), base, it.ID)
+	for _, f := range srv.shareFiles(&s) {
+		fmt.Fprintf(&b, "  %s (%s)\n    curl -L -o %s '%s/files/%s?download'\n", joinPath(f.Path, f.Name), formatBytes(f.Size), shellQuote(f.Name), base, f.ID)
 	}
 	textResponse(w, http.StatusOK, b.String())
 }
@@ -223,13 +217,14 @@ func (srv *server) handlePublicShare(w http.ResponseWriter, r *http.Request) {
 	type file struct {
 		ID        string `json:"id"`
 		Name      string `json:"name"`
+		Path      string `json:"path,omitempty"` // the subfolder of a shared folder it's in
 		Size      int64  `json:"size"`
 		Modified  int64  `json:"modified"`
 		NoPreview bool   `json:"noPreview,omitempty"` // sent as a download whatever its kind
 	}
 	files := []file{}
-	for _, it := range srv.shareFiles(&s) {
-		files = append(files, file{it.ID, it.Name, it.Size, it.Modified, srv.downloadOnly(&it)})
+	for _, f := range srv.shareFiles(&s) {
+		files = append(files, file{f.ID, f.Name, f.Path, f.Size, f.Modified, srv.downloadOnly(&f.Item)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": status, "name": s.Name, "message": s.Message, "expires": s.Expires, "files": files, "password": s.PasswordHash != "",
@@ -338,12 +333,12 @@ func (srv *server) handleShareFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	for _, it := range srv.shareFiles(&s) {
-		if it.ID == id {
-			if !srv.countDownload(w, r, s.ID, it.ID) {
+	for _, f := range srv.shareFiles(&s) {
+		if f.ID == id {
+			if !srv.countDownload(w, r, s.ID, f.ID) {
 				return
 			}
-			srv.serveFile(w, r, &it, r.URL.Query().Has("download"))
+			srv.serveFile(w, r, &f.Item, r.URL.Query().Has("download"))
 			return
 		}
 	}
@@ -351,7 +346,8 @@ func (srv *server) handleShareFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleShareZip streams every file of the share as one zip. Files are stored without
-// compression: it's fast, and photos, videos and archives barely shrink anyway.
+// compression: it's fast, and photos, videos and archives barely shrink anyway. A shared folder's
+// files keep their subfolders. Names can't hold a slash or be "..", so no entry points outside.
 func (srv *server) handleShareZip(w http.ResponseWriter, r *http.Request) {
 	s, ok := srv.shareDownload(w, r)
 	if !ok {
@@ -371,9 +367,9 @@ func (srv *server) handleShareZip(w http.ResponseWriter, r *http.Request) {
 	zw := zip.NewWriter(w)
 	used := map[string]bool{}
 	for _, it := range files {
-		name := it.Name
+		name := joinPath(it.Path, it.Name)
 		for n := 2; used[strings.ToLower(name)]; n++ {
-			name = fmt.Sprintf("%d-%s", n, it.Name)
+			name = joinPath(it.Path, fmt.Sprintf("%d-%s", n, it.Name))
 		}
 		used[strings.ToLower(name)] = true
 		f, err := os.Open(srv.st.blobPath(it.ID))

@@ -10,10 +10,10 @@ collect files from other people and send files to them, without anyone seeing mo
   database backup. You can also limit the number of files, set an expiry date and add a password.
   A PDF received this way is downloaded rather than opened in the browser, whose PDF viewer runs
   outside the safeguards Stash puts on other previews.
-- **Share links.** Want to send someone files? Pick them and send a share link. They can view and
-  download only those files, one by one or all at once. Share links can expire, stop after a number
-  of downloads (every file viewed or downloaded counts, so a limited share shows no previews), and
-  have a password. A download that breaks off can be resumed in the same browser for a day,
+- **Share links.** Want to send someone files? Pick them, or a whole folder, and send a share link.
+  They can view and download only what you shared, one by one or all at once. Share links can
+  expire, stop after a number of downloads (every file viewed or downloaded counts, so a limited
+  share shows no previews), and have a password. A download that breaks off can be resumed in the same browser for a day,
   without counting again.
 
 The people you send links to don't need an account. They upload from their browser, or, for very
@@ -68,6 +68,9 @@ once.
 
 - Drag files onto the page, or click **Upload files**. Every file gets its own progress bar, and
   you can keep working while they upload.
+- Folders work the same way: drag them onto the page, or click **Upload folder**. The folders inside
+  come along. If a folder with the same name is already there, the files are added to it. Empty
+  folders are left out.
 - Click **New folder** to make a folder.
 - Click a file to see it, download it, share it or delete it.
 - Every file and folder has a **⋯** button with everything you can do with it. Right-clicking a
@@ -81,12 +84,13 @@ once.
 1. Go to **Upload links** and click **New upload link**.
 2. Give it a name, which they'll see as the title of the page, and choose a size limit. If you
    like, set an expiry date, a maximum number of files, a password and a message.
-3. Copy the link and send it. Or click **QR code**: a phone's camera opens the link from the code,
+3. Copy the link and send it. Or click **Show QR code**: a phone's camera opens the link from the code,
    and you can download the code to print it, for example on a sign at an event.
 
 The person who opens the link sees your message, how much space is left, and an area to drag files
-onto. They can't see files that are already there. If the link is full, has expired or was revoked,
-they get a clear message instead.
+or folders onto. They can't see files that are already there. If the link is full, has expired or
+was revoked, they get a clear message instead. A folder they upload arrives with the folders inside
+it, and every file in it counts towards the link's limits.
 
 Files arrive in **My files › Requests**, in a folder named after the link. Renaming that folder
 renames the link too, and deleting it revokes the link. You can change a link's limits, revoke it or
@@ -95,12 +99,18 @@ reopen it at any time.
 ### Sending someone files: share links
 
 1. Tick the files you want to send and click **Create share link**. Or go to **Share links** and
-   click **New share link**.
+   click **New share link**. To send a whole folder, open it and click **Share folder**, or choose
+   **Share folder…** from its **⋯** menu.
 2. Give it a name and, if you like, an expiry date, a download limit, a password and a message.
-3. Copy the link and send it, or click **QR code** to open it on a phone or print it.
+3. Copy the link and send it, or click **Show QR code** to open it on a phone or print it.
 
 They see the files with previews, and can download them one by one or all together as a zip file.
 A file you delete disappears from the link, and comes back if you restore it from the trash.
+
+A shared folder includes the folders inside it. The page shows each of them under its own heading,
+and the zip file keeps them as folders. Files you add to the folder later show up on the link too.
+**My files** itself can't be shared as a whole, because that would include what people send you
+through upload links.
 
 ### Very large files: the command line
 
