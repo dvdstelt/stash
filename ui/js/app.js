@@ -931,8 +931,7 @@ const actions = {
   // A click anywhere on the link copies it, and selects it to show what was copied.
   'copy-link': (el) => {
     const input = el.closest('.link-field').querySelector('input');
-    input.select();
-    copy(input.value, 'Link copied');
+    copy(input.value, 'Link copied').then(() => input.select());
   },
   'toggle-qr': (el) => {
     const panel = el.closest('.link-panel').querySelector('[data-qr]');
