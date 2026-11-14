@@ -556,13 +556,35 @@ function toast(message, iconName = 'check') {
   }, 2200);
 }
 
+// Browsers only offer the clipboard on HTTPS and localhost. On a plain home-network address, such
+// as http://192.168.1.20:8080, copying falls back to selecting the text and the copy command.
+function copyBySelection(text) {
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.readOnly = true;
+  area.style.position = 'fixed';
+  area.style.opacity = '0';
+  const before = document.activeElement;
+  (document.querySelector('dialog[open]') ?? document.body).append(area); // outside an open dialog it can't be selected
+  area.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { /* not supported */ }
+  area.remove();
+  before?.focus?.();
+  return ok;
+}
+
 async function copy(text, message = 'Copied') {
+  let ok = false;
   try {
     await navigator.clipboard.writeText(text);
-    toast(message);
+    ok = true;
   } catch {
-    toast('Couldn’t copy. Select the text and copy it yourself.', 'alert');
+    ok = copyBySelection(text);
   }
+  if (ok) toast(message);
+  else toast('Couldn’t copy. Select the text and copy it yourself.', 'alert');
+  return ok;
 }
 
 function toggleTheme() {
