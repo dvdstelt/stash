@@ -376,7 +376,8 @@ dialog.modal > form { display: flex; flex: 1; flex-direction: column; min-height
 
 /* ---------- Links and command snippets ---------- */
 
-.link-panel { display: grid; gap: 16px; }
+/* minmax(0, 1fr): a long command scrolls in its box instead of widening the panel and its dialog. */
+.link-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .linkbox { display: flex; flex-wrap: wrap; gap: 8px; }
 .linkbox .input { flex: 1 1 260px; min-width: 0; font-size: 13px; }
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
