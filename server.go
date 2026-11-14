@@ -359,15 +359,16 @@ func (srv *server) serveFile(w http.ResponseWriter, r *http.Request, it *Item, d
 }
 
 // downloadOnly says whether a file is always sent as a download, even though its kind could
-// open in the browser. That goes for PDFs received through an upload link: the browser's PDF
-// viewer runs outside the sandbox the other inline files get, and the sender is a stranger.
+// open in the browser. That goes for PDFs received through an upload link, also in a folder that
+// came with them: the browser's PDF viewer runs outside the sandbox the other inline files get,
+// and the sender is a stranger.
 func (srv *server) downloadOnly(it *Item) bool {
 	if strings.ToLower(filepath.Ext(it.Name)) != ".pdf" {
 		return false
 	}
 	srv.st.mu.Lock()
 	defer srv.st.mu.Unlock()
-	return srv.st.linkByFolder(it.Parent) != nil
+	return srv.st.underLink(it.Parent)
 }
 
 /* ---------- Housekeeping ---------- */

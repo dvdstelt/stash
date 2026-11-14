@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -213,8 +214,15 @@ func wantNoBody(t *testing.T, r reply, substrings ...string) {
 // upload stores a file as the owner, through the same chunked upload the owner's page uses.
 func (e *testEnv) upload(parent, name string, content []byte) Item {
 	e.t.Helper()
+	return e.uploadIn(parent, "", name, content)
+}
+
+// uploadIn stores a file as the owner's page does for a dropped folder: path is the folder the
+// file was in, such as "Trip/Day 1".
+func (e *testEnv) uploadIn(parent, path, name string, content []byte) Item {
+	e.t.Helper()
 	var started struct{ ID string }
-	e.expect(e.api(http.MethodPost, "/api/uploads", map[string]any{"parent": parent, "name": name, "size": len(content)}), http.StatusCreated).decode(e.t, &started)
+	e.expect(e.api(http.MethodPost, "/api/uploads", map[string]any{"parent": parent, "path": path, "name": name, "size": len(content)}), http.StatusCreated).decode(e.t, &started)
 	r := e.expect(e.send(e.owner, http.MethodPut, "/api/uploads/"+started.ID+"?offset=0", bytes.NewReader(content), "X-Stash", "1"), http.StatusOK)
 	var done struct {
 		Done bool
@@ -223,6 +231,23 @@ func (e *testEnv) upload(parent, name string, content []byte) Item {
 	r.decode(e.t, &done)
 	if !done.Done {
 		e.t.Fatalf("upload of %s didn't finish: %s", name, r.body)
+	}
+	return done.Item
+}
+
+// uploadThrough sends a file through an upload link the way its page does, in one chunk. path is
+// the folder the file was in when a folder is uploaded, or "".
+func (e *testEnv) uploadThrough(c *http.Client, token, path, name, data string) Item {
+	e.t.Helper()
+	var started struct{ ID string }
+	e.expect(e.sendJSON(c, http.MethodPost, "/api/public/d/"+token+"/uploads", map[string]any{"path": path, "name": name, "size": len(data)}), http.StatusCreated).decode(e.t, &started)
+	var done struct {
+		Done bool
+		Item Item
+	}
+	e.expect(e.send(c, http.MethodPut, "/api/public/d/"+token+"/uploads/"+started.ID+"?offset=0", strings.NewReader(data)), http.StatusOK).decode(e.t, &done)
+	if !done.Done {
+		e.t.Fatalf("the upload of %s didn't finish", name)
 	}
 	return done.Item
 }
@@ -322,6 +347,34 @@ func (e *testEnv) filesIn(folder string) map[string]Item {
 		}
 	}
 	return out
+}
+
+// pathOf says where an item is below My files, such as "Trip/Day 1/photo.jpg".
+func (e *testEnv) pathOf(id string) string {
+	e.srv.st.mu.Lock()
+	defer e.srv.st.mu.Unlock()
+	var names []string
+	for it := e.srv.st.items[id]; it != nil && it.ID != rootID; it = e.srv.st.items[it.Parent] {
+		names = append([]string{it.Name}, names...)
+	}
+	return strings.Join(names, "/")
+}
+
+// listing names what's in a folder, leaving out the trash, in name order. Folders end in a
+// slash: "Day 1/, a.jpg".
+func (e *testEnv) listing(folder string) string {
+	e.srv.st.mu.Lock()
+	defer e.srv.st.mu.Unlock()
+	var names []string
+	for _, it := range e.srv.st.liveChildren(folder) {
+		if it.Type == "folder" {
+			names = append(names, it.Name+"/")
+		} else {
+			names = append(names, it.Name)
+		}
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 func (e *testEnv) blob(id string) string {

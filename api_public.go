@@ -120,8 +120,8 @@ func (srv *server) handlePublicUploadStart(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var in struct {
-		Name string
-		Size int64
+		Name, Path string
+		Size       int64
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -130,7 +130,7 @@ func (srv *server) handlePublicUploadStart(w http.ResponseWriter, r *http.Reques
 		jsonError(w, http.StatusBadRequest, "The size can't be negative.")
 		return
 	}
-	u, err := srv.startUpload(in.Name, l.Folder, l, in.Size)
+	u, err := srv.startUpload(in.Name, in.Path, l.Folder, l, in.Size)
 	if err != nil {
 		status, msg := errorStatus(err)
 		jsonError(w, status, msg)

@@ -212,10 +212,12 @@ Some limits to know:
 
 **Uploaded files.**
 - Files are stored under random IDs. Names are cleaned: only the last path element, no control
-  characters, at most 255 bytes.
+  characters, at most 255 bytes. The folder path of an uploaded folder is cleaned the same way,
+  element by element, and only names folders inside the upload's own folder.
 - Only a short list of types opens in the browser: images, PDF, MP4/WebM/QuickTime video, and text.
   They're served with a fixed `Content-Type`, `X-Content-Type-Options: nosniff`, and a sandboxing
-  `Content-Security-Policy`, except PDFs, which the browser's viewer can't show sandboxed.
+  `Content-Security-Policy`, except PDFs, which the browser's viewer can't show sandboxed. So a PDF
+  received through an upload link is always a download, also in a folder that came with it.
 - Everything else, including HTML and SVG, is served as a download (`application/octet-stream`,
   `Content-Disposition: attachment`).
 
@@ -261,7 +263,8 @@ back with it.
 ### From the browser: resumable chunks
 
 1. `POST .../uploads` with `{"name", "size"}` checks the limits, sets the space aside, and returns an
-   upload `id`.
+   upload `id`. A file from an uploaded folder also sends `path`: the folder it was in, such as
+   `Trip/Day 1` (see [Folders](#folders)).
 2. `PUT .../uploads/<id>?offset=N` sends the bytes from position N, normally 32 MB at a time. The
    answer is `{"received"}`, or `{"done": true, "item"}` after the last byte.
 3. If a chunk fails halfway, the page asks `GET .../uploads/<id>` how much arrived and continues
@@ -270,6 +273,26 @@ back with it.
 
 For the owner the base path is `/api/uploads`, with `parent` (a folder ID) in the start request. For
 upload links it's `/api/public/d/<token>/uploads`.
+
+### Folders
+
+A folder is uploaded one file at a time, each with its `path`. Strangers can't make folders, so the
+server makes them, inside `parent` or the link's folder:
+
+- **Cleaned element by element.** `/` and `\` both separate folders. Each element is cleaned like a
+  file name, and elements without a usable name (empty, `.` or `..`) are left out. The elements are
+  only names to look up or make, so a path can't lead out of the upload's folder. At most 64
+  folders inside each other.
+- **Made when the file is done**, not when the upload starts. An upload that fails or is cancelled
+  leaves no empty folder, and a stranger can only make folders by sending files, within the link's
+  limits.
+- **Added to, not numbered.** A folder with the same name, ignoring case, gets the file, so
+  uploading `Trip` twice fills one `Trip`, as does every file of one upload. Folders in the trash
+  don't count: the file gets a new folder. Only when a *file* has the name does the folder become
+  `name (2)`, or the first such name that's a folder or still free, so all files still land in the
+  same one.
+- **Counted on the link.** An upload link's size and file limits count the files in its folder and
+  in every folder below it, leaving out what's in the trash.
 
 ### From the command line: one request
 

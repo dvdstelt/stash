@@ -21,9 +21,10 @@ type upload struct {
 	id       string
 	name     string
 	parent   string
-	linkID   string // set for uploads through an upload link
-	size     int64  // expected size, or -1 if the sender didn't say (console upload without Content-Length)
-	reserved int64  // bytes set aside for this upload
+	path     []string // folders inside parent to put the file in, made when it's done
+	linkID   string   // set for uploads through an upload link
+	size     int64    // expected size, or -1 if the sender didn't say (console upload without Content-Length)
+	reserved int64    // bytes set aside for this upload
 	received int64
 	file     *os.File
 	touched  atomic.Int64 // when the last bytes arrived, in Unix nanoseconds; read without mu
@@ -66,11 +67,16 @@ func (srv *server) spaceLeft() int64 {
 }
 
 // startUpload checks the limits and sets space aside. With size -1 it sets aside everything
-// that's left, and settles on the real size when the upload ends.
-func (srv *server) startUpload(name, parent string, link *Link, size int64) (*upload, error) {
+// that's left, and settles on the real size when the upload ends. path is the folder the file
+// was in when a whole folder is uploaded, such as "Trip/Day 1", or "".
+func (srv *server) startUpload(name, path, parent string, link *Link, size int64) (*upload, error) {
 	name, err := cleanName(name)
 	if err != nil {
 		return nil, &httpError{http.StatusBadRequest, "The file needs a name."}
+	}
+	folders, err := cleanPath(path)
+	if err != nil {
+		return nil, &httpError{http.StatusBadRequest, err.Error()}
 	}
 	srv.st.mu.Lock()
 	defer srv.st.mu.Unlock()
@@ -103,7 +109,7 @@ func (srv *server) startUpload(name, parent string, link *Link, size int64) (*up
 		return nil, &httpError{http.StatusRequestEntityTooLarge, tooLarge}
 	}
 
-	u := &upload{id: newID(), name: name, parent: parent, size: size, reserved: size}
+	u := &upload{id: newID(), name: name, parent: parent, path: folders, size: size, reserved: size}
 	u.touch()
 	if size < 0 {
 		u.reserved = limit
@@ -220,6 +226,11 @@ func (srv *server) finishLocked(u *upload) (*Item, error) {
 	if parent == nil { // the owner deleted the folder for good while the upload ran
 		parent = srv.st.items[rootID]
 	}
+	// The folders are made only now, so an upload that fails or is cancelled leaves no empty
+	// folders behind, and a stranger can't make folders without sending files.
+	for _, name := range u.path {
+		parent = srv.st.subfolder(parent.ID, name)
+	}
 	now := nowMillis()
 	it := &Item{ID: newID(), Type: "file", Parent: parent.ID, Name: srv.st.uniqueName(parent.ID, u.name), Size: u.received, Modified: now}
 	if err := os.Rename(srv.st.partPath(u.id), srv.st.blobPath(it.ID)); err != nil {
@@ -307,8 +318,8 @@ func (srv *server) ownerUpload(next uploadHandler) http.HandlerFunc {
 
 func (srv *server) handleOwnerUploadStart(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Parent, Name string
-		Size         int64
+		Parent, Name, Path string
+		Size               int64
 	}
 	if !readJSON(w, r, &in) {
 		return
@@ -317,7 +328,7 @@ func (srv *server) handleOwnerUploadStart(w http.ResponseWriter, r *http.Request
 		jsonError(w, http.StatusBadRequest, "The size can't be negative.")
 		return
 	}
-	u, err := srv.startUpload(in.Name, in.Parent, nil, in.Size)
+	u, err := srv.startUpload(in.Name, in.Path, in.Parent, nil, in.Size)
 	if err != nil {
 		status, msg := errorStatus(err)
 		jsonError(w, status, msg)
@@ -370,7 +381,7 @@ func (srv *server) handleConsoleUpload(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	u, err := srv.startUpload(r.PathValue("name"), link.Folder, link, r.ContentLength)
+	u, err := srv.startUpload(r.PathValue("name"), "", link.Folder, link, r.ContentLength)
 	if err != nil {
 		status, msg := errorStatus(err)
 		consoleError(w, r, status, msg+"\n")
