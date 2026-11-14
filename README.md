@@ -81,7 +81,8 @@ once.
 1. Go to **Upload links** and click **New upload link**.
 2. Give it a name, which they'll see as the title of the page, and choose a size limit. If you
    like, set an expiry date, a maximum number of files, a password and a message.
-3. Copy the link and send it.
+3. Copy the link and send it. Or click **QR code**: a phone's camera opens the link from the code,
+   and you can download the code to print it, for example on a sign at an event.
 
 The person who opens the link sees your message, how much space is left, and an area to drag files
 onto. They can't see files that are already there. If the link is full, has expired or was revoked,
@@ -96,7 +97,7 @@ reopen it at any time.
 1. Tick the files you want to send and click **Create share link**. Or go to **Share links** and
    click **New share link**.
 2. Give it a name and, if you like, an expiry date, a download limit, a password and a message.
-3. Copy the link and send it.
+3. Copy the link and send it, or click **QR code** to open it on a phone or print it.
 
 They see the files with previews, and can download them one by one or all together as a zip file.
 A file you delete disappears from the link, and comes back if you restore it from the trash.

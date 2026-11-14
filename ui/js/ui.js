@@ -70,6 +70,7 @@ const PATHS = {
   pencil: '<path d="M4 20h4L19 9a2.83 2.83 0 0 0-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
   eye: '<path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>',
+  qr: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="M7 7h.01M17 7h.01M7 17h.01M13.5 13.5h3M20.5 13.5h.01M13.5 20.5v-3M17 17h.01M20.5 17v3.5H17"/>',
 };
 
 const icon = (name, cls = '') =>
@@ -260,6 +261,276 @@ function dropZone({ title, hint, button = 'Choose files', compact = false, disab
   </div>`;
 }
 
+/* ---------- QR codes ---------- */
+
+// A small QR code encoder for links, following ISO/IEC 18004: byte mode, error correction level M
+// (a code still scans with 15% of it damaged), versions 1 to 40, and the mask with the lowest
+// penalty. A link of 50 characters becomes a version 4 code: 33 by 33 modules.
+
+// Per version, at level M: error correction codewords per block, and the number of blocks.
+const QR_EC = [10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28, 28, 26, 26, 26,
+  26, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28];
+const QR_BLOCKS = [1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16,
+  17, 17, 18, 20, 21, 23, 25, 26, 28, 29, 31, 33, 35, 37, 38, 40, 43, 45, 47, 49];
+
+const QR_MASKS = [
+  (x, y) => (x + y) % 2 === 0,
+  (x, y) => y % 2 === 0,
+  (x, y) => x % 3 === 0,
+  (x, y) => (x + y) % 3 === 0,
+  (x, y) => (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0,
+  (x, y) => ((x * y) % 2) + ((x * y) % 3) === 0,
+  (x, y) => (((x * y) % 2) + ((x * y) % 3)) % 2 === 0,
+  (x, y) => (((x + y) % 2) + ((x * y) % 3)) % 2 === 0,
+];
+
+/** Multiplication in GF(256), modulo x^8 + x^4 + x^3 + x^2 + 1. */
+function gfMul(x, y) {
+  let z = 0;
+  for (let i = 7; i >= 0; i--) {
+    z = (z << 1) ^ ((z >>> 7) * 0x11d);
+    z ^= ((y >>> i) & 1) * x;
+  }
+  return z;
+}
+
+/** Reed-Solomon error correction for each block of data, all with `degree` codewords. */
+function qrErrorCorrection(blocks, degree) {
+  // The generator polynomial (x - 1)(x - 2)(x - 4)…, highest power first and its leading 1 left out.
+  const gen = new Array(degree).fill(0);
+  gen[degree - 1] = 1;
+  for (let i = 0, root = 1; i < degree; i++, root = gfMul(root, 2)) {
+    for (let j = 0; j < degree; j++) gen[j] = gfMul(gen[j], root) ^ (gen[j + 1] ?? 0);
+  }
+  return blocks.map((data) => {
+    const rem = new Array(degree).fill(0);
+    for (const byte of data) {
+      const factor = byte ^ rem.shift();
+      rem.push(0);
+      gen.forEach((g, i) => { rem[i] ^= gfMul(g, factor); });
+    }
+    return rem;
+  });
+}
+
+/** Modules left for data and error correction once the fixed patterns are drawn. */
+function qrDataModules(ver) {
+  let n = (16 * ver + 128) * ver + 64;
+  if (ver >= 2) {
+    const align = Math.floor(ver / 7) + 2;
+    n -= (25 * align - 10) * align - 55;
+    if (ver >= 7) n -= 36;
+  }
+  return n;
+}
+
+/** Centers of the alignment patterns, the same list for rows and columns. */
+function qrAlignment(ver, size) {
+  if (ver === 1) return [];
+  const n = Math.floor(ver / 7) + 2;
+  const step = Math.floor((ver * 8 + n * 3 + 5) / (n * 4 - 4)) * 2;
+  const pos = [6];
+  for (let p = size - 7; pos.length < n; p -= step) pos.splice(1, 0, p);
+  return pos;
+}
+
+/** The two copies of the 15 format bits, as [x, y], bit 0 first. */
+function qrFormatCells(size) {
+  const cells = [];
+  for (let i = 0; i < 15; i++) cells.push(i < 6 ? [8, i] : i < 8 ? [8, i + 1] : i === 8 ? [7, 8] : [14 - i, 8]);
+  for (let i = 0; i < 15; i++) cells.push(i < 8 ? [size - 1 - i, 8] : [8, size - 15 + i]);
+  return cells;
+}
+
+function qrFormatBits(mask) {
+  let rem = mask; // level M is 00, followed by the mask number
+  for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+  return ((mask << 10) | rem) ^ 0x5412;
+}
+
+/** Lower is better: long runs, blocks, finder-like patterns and an uneven balance all add up. */
+function qrPenalty(m) {
+  const size = m.length;
+  let score = 0;
+  for (let i = 0; i < size; i++) {
+    for (const line of [m[i], m.map((row) => row[i])]) {
+      for (let x = 1, run = 1; x <= size; x++) {
+        if (x < size && line[x] === line[x - 1]) run++;
+        else {
+          if (run >= 5) score += run - 2;
+          run = 1;
+        }
+      }
+      const s = line.map(Number).join('');
+      for (const p of ['10111010000', '00001011101']) {
+        for (let at = s.indexOf(p); at >= 0; at = s.indexOf(p, at + 1)) score += 40;
+      }
+    }
+  }
+  for (let y = 0; y < size - 1; y++) {
+    for (let x = 0; x < size - 1; x++) {
+      const c = m[y][x];
+      if (c === m[y][x + 1] && c === m[y + 1][x] && c === m[y + 1][x + 1]) score += 3;
+    }
+  }
+  const dark = m.flat().filter(Boolean).length;
+  const total = size * size;
+  return score + (Math.ceil(Math.abs(dark * 20 - total * 10) / total) - 1) * 10;
+}
+
+/** The QR code for text, as rows of modules: true is dark. Throws if the text is too long. */
+function qrCode(text) {
+  const data = [...new TextEncoder().encode(text)];
+  let ver = 1;
+  let total;
+  let dataLen;
+  for (;; ver++) {
+    if (ver > 40) throw new Error('Too long for a QR code');
+    total = qrDataModules(ver) >> 3;
+    dataLen = total - QR_EC[ver - 1] * QR_BLOCKS[ver - 1];
+    if (4 + (ver < 10 ? 8 : 16) + data.length * 8 <= dataLen * 8) break;
+  }
+
+  // Mode, length and the bytes, then a terminator and padding up to the data capacity.
+  const bits = [];
+  const put = (value, len) => { for (let i = len - 1; i >= 0; i--) bits.push((value >>> i) & 1); };
+  put(0b0100, 4);
+  put(data.length, ver < 10 ? 8 : 16);
+  data.forEach((byte) => put(byte, 8));
+  put(0, Math.min(4, dataLen * 8 - bits.length));
+  put(0, (8 - (bits.length % 8)) % 8);
+  for (let pad = 0xec; bits.length < dataLen * 8; pad ^= 0xec ^ 0x11) put(pad, 8);
+  const codewords = [];
+  for (let i = 0; i < bits.length; i += 8) codewords.push(bits.slice(i, i + 8).reduce((v, bit) => (v << 1) | bit, 0));
+
+  // Split into blocks, the later ones one codeword longer, add error correction, and interleave.
+  const numBlocks = QR_BLOCKS[ver - 1];
+  const ecLen = QR_EC[ver - 1];
+  const shortBlocks = numBlocks - (total % numBlocks);
+  const shortLen = Math.floor(total / numBlocks) - ecLen;
+  const blocks = [];
+  for (let i = 0, at = 0; i < numBlocks; i++) {
+    const len = shortLen + (i < shortBlocks ? 0 : 1);
+    blocks.push(codewords.slice(at, at + len));
+    at += len;
+  }
+  const ec = qrErrorCorrection(blocks, ecLen);
+  const stream = [];
+  for (let i = 0; i <= shortLen; i++) blocks.forEach((block) => { if (i < block.length) stream.push(block[i]); });
+  for (let i = 0; i < ecLen; i++) ec.forEach((block) => stream.push(block[i]));
+
+  // The fixed patterns: timing, finders with their separators, alignment, version, and room for the format.
+  const size = ver * 4 + 17;
+  const dark = Array.from({ length: size }, () => new Array(size).fill(false));
+  const fixed = Array.from({ length: size }, () => new Array(size).fill(false));
+  const set = (x, y, on) => {
+    dark[y][x] = on;
+    fixed[y][x] = true;
+  };
+  for (let i = 0; i < size; i++) {
+    set(6, i, i % 2 === 0);
+    set(i, 6, i % 2 === 0);
+  }
+  for (const [cx, cy] of [[3, 3], [size - 4, 3], [3, size - 4]]) {
+    for (let dy = -4; dy <= 4; dy++) {
+      for (let dx = -4; dx <= 4; dx++) {
+        const d = Math.max(Math.abs(dx), Math.abs(dy));
+        const x = cx + dx;
+        const y = cy + dy;
+        if (x >= 0 && x < size && y >= 0 && y < size) set(x, y, d !== 2 && d !== 4);
+      }
+    }
+  }
+  const align = qrAlignment(ver, size);
+  const last = align.length - 1;
+  align.forEach((ax, i) => align.forEach((ay, j) => {
+    if ((i === 0 && j === 0) || (i === 0 && j === last) || (i === last && j === 0)) return; // the finders' corners
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) set(ax + dx, ay + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+    }
+  }));
+  if (ver >= 7) {
+    let rem = ver;
+    for (let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1f25);
+    const bits18 = (ver << 12) | rem;
+    for (let i = 0; i < 18; i++) {
+      const on = ((bits18 >>> i) & 1) === 1;
+      set(size - 11 + (i % 3), Math.floor(i / 3), on);
+      set(Math.floor(i / 3), size - 11 + (i % 3), on);
+    }
+  }
+  const formatCells = qrFormatCells(size);
+  formatCells.forEach(([x, y]) => set(x, y, false));
+  set(8, size - 8, true);
+
+  // The codewords go in two-module columns from the bottom right, upwards and downwards in turn.
+  let i = 0;
+  for (let right = size - 1; right >= 1; right -= 2) {
+    if (right === 6) right = 5; // skip the vertical timing pattern
+    const upward = ((right + 1) & 2) === 0;
+    for (let v = 0; v < size; v++) {
+      const y = upward ? size - 1 - v : v;
+      for (const x of [right, right - 1]) {
+        if (fixed[y][x] || i >= stream.length * 8) continue;
+        dark[y][x] = ((stream[i >>> 3] >>> (7 - (i & 7))) & 1) === 1;
+        i++;
+      }
+    }
+  }
+
+  let best = null;
+  let bestScore = Infinity;
+  QR_MASKS.forEach((fn, mask) => {
+    const m = dark.map((row, y) => row.map((on, x) => on !== (!fixed[y][x] && fn(x, y))));
+    const format = qrFormatBits(mask);
+    formatCells.forEach(([x, y], k) => { m[y][x] = ((format >>> (k % 15)) & 1) === 1; });
+    const score = qrPenalty(m);
+    if (score < bestScore) {
+      best = m;
+      bestScore = score;
+    }
+  });
+  return best;
+}
+
+/** A QR code as an SVG image: always dark on light, with the quiet zone of 4 modules around it. */
+function qrSvg(text) {
+  const m = qrCode(text);
+  const n = m.length + 8;
+  let d = '';
+  m.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      if (!row[x]) continue;
+      let end = x;
+      while (row[end + 1]) end++;
+      d += `M${x + 4} ${y + 4}h${end - x + 1}v1H${x + 4}z`;
+      x = end;
+    }
+  });
+  return html`<svg class="qr" viewBox="0 0 ${n} ${n}" shape-rendering="crispEdges" role="img" aria-label="QR code"><rect width="${n}" height="${n}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+
+/** Save a QR code as a PNG file of about 1000 pixels square, sharp enough to print. */
+function downloadQr(text, filename) {
+  const m = qrCode(text);
+  const n = m.length + 8;
+  const scale = Math.ceil(1000 / n);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = n * scale;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#000';
+  m.forEach((row, y) => row.forEach((on, x) => { if (on) ctx.fillRect((x + 4) * scale, (y + 4) * scale, scale, scale); }));
+  canvas.toBlob((blob) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  }, 'image/png');
+}
+
 /* ---------- Feedback, events, theme ---------- */
 
 function toast(message, iconName = 'check') {
@@ -341,6 +612,6 @@ function delegate(actions = {}, submits = {}) {
 window.StashUI = {
   Safe, esc, raw, b, html, icon, hydrateIcons, bytes, rel, date, slug, KIND_ICON, kindOf, imgSrc, thumb, previewMedia,
   uploadSnippets, shareSnippets, snippetTabs, brandHeader, stateCard, passwordGate, toast, copy, toggleTheme, delegate,
-  simulatedRate, uploadRow, updateUploadRow, dropZone,
+  simulatedRate, uploadRow, updateUploadRow, dropZone, qrCode, qrSvg, downloadQr,
 };
 })();

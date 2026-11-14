@@ -3,7 +3,7 @@
 const {
   html, raw, b, icon, bytes, rel, date, kindOf, thumb, previewMedia,
   snippetTabs, uploadSnippets, shareSnippets, toast, delegate, hydrateIcons,
-  uploadRow, updateUploadRow, dropZone,
+  uploadRow, updateUploadRow, dropZone, slug, qrSvg, downloadQr,
 } = window.StashUI;
 const { store, uploadUrl, shareUrl, MB, GB, TB } = window.StashData;
 const { request, uploadFile } = window.StashAPI;
@@ -134,12 +134,23 @@ function confirmModal({ title, body, confirm, onConfirm }) {
     <div class="modal-foot"><button type="button" class="btn" data-action="close-modal" autofocus>Cancel</button><button type="button" class="btn btn-danger-solid" data-action="confirm">${confirm}</button></div>`, 'narrow');
 }
 
-function linkPanel(url, snippets, previewHref) {
+function linkPanel(url, name, snippets, previewHref) {
   return html`<div class="link-panel">
     <div class="linkbox">
       <input class="input mono" readonly value="${url}" aria-label="Link" data-action="select-text">
-      <button type="button" class="btn" data-action="copy" data-text="${url}" data-msg="Link copied">${icon('copy')} Copy link</button>
-      <a class="btn btn-ghost" href="${previewHref}" target="_blank" rel="noopener" title="Open the page the recipient sees">${icon('external')} Preview</a>
+      <div class="linkbox-actions">
+        <button type="button" class="btn" data-action="copy" data-text="${url}" data-msg="Link copied">${icon('copy')} Copy link</button>
+        <button type="button" class="btn btn-ghost" data-action="toggle-qr" aria-expanded="false" title="Show the link as a QR code, to open it on a phone or print it">${icon('qr')} QR code</button>
+        <a class="btn btn-ghost" href="${previewHref}" target="_blank" rel="noopener" title="Open the page the recipient sees">${icon('external')} Preview</a>
+      </div>
+    </div>
+    <div class="qr-panel" data-qr hidden>
+      ${qrSvg(url)}
+      <div class="qr-text">
+        <p><strong>Point a phone’s camera at the code</strong> to open the link on the phone.</p>
+        <p class="hint">To put the link on paper, such as a poster or a sign, download the code and print it.</p>
+        <button type="button" class="btn" data-action="download-qr" data-url="${url}" data-name="${name}">${icon('download')} Download image</button>
+      </div>
     </div>
     ${snippetTabs(snippets)}
   </div>`;
@@ -648,7 +659,7 @@ function requestDetail(id) {
       </div>
     </div>
     ${r.message ? html`<div class="card note"><div class="stat-label">Message shown to uploaders</div><p>${r.message}</p></div>` : ''}
-    ${closed ? '' : html`<section class="section"><h2>Send this link</h2><div class="card">${linkPanel(url, uploadSnippets(url, r), `/d/${r.token}`)}</div></section>`}
+    ${closed ? '' : html`<section class="section"><h2>Send this link</h2><div class="card">${linkPanel(url, r.name, uploadSnippets(url, r), `/d/${r.token}`)}</div></section>`}
     <section class="section">
       <h2>Received files ${u.files ? html`<span class="muted">· ${bytes(u.used)}</span>` : ''}</h2>
       ${files.length ? listView(files, { selectable: false }) : html`<div class="card empty">${icon('inbox')}<p>Nothing uploaded yet.</p></div>`}
@@ -742,7 +753,7 @@ function showCreatedRequest(r) {
   showModal(html`${modalHead('Upload link ready')}
     <div class="modal-body">
       <div class="banner">${icon('check')}<div><strong>${r.name}</strong><div class="small muted">${linkSummary(r)}</div></div></div>
-      ${linkPanel(url, uploadSnippets(url, r), `/d/${r.token}`)}
+      ${linkPanel(url, r.name, uploadSnippets(url, r), `/d/${r.token}`)}
       <p class="hint">Opened in a browser, the link shows an upload page. The commands upload straight from a terminal on macOS, Linux or Windows, which is handy for very large files. For several files at once: curl -T "{a.zip,b.zip}" followed by the link.</p>
     </div>
     <div class="modal-foot"><a class="btn" href="#/upload-links/${r.id}" data-action="close-modal">View link details</a><button type="button" class="btn btn-primary" data-action="close-modal">Done</button></div>`);
@@ -802,7 +813,7 @@ function shareDetail(id) {
       <div class="card stat"><div class="stat-label">Access</div><div class="stat-value">${s.password ? 'Password' : 'Link only'}</div><p class="hint">${s.password ? 'Visitors need the password' : 'Anyone with the link can view'}</p></div>
     </div>
     ${s.message ? html`<div class="card note"><div class="stat-label">Message shown to visitors</div><p>${s.message}</p></div>` : ''}
-    ${status === 'active' ? html`<section class="section"><h2>Send this link</h2><div class="card">${linkPanel(url, shareSnippets(url, s), `/s/${s.token}`)}</div></section>` : ''}
+    ${status === 'active' ? html`<section class="section"><h2>Send this link</h2><div class="card">${linkPanel(url, s.name, shareSnippets(url, s), `/s/${s.token}`)}</div></section>` : ''}
     <section class="section">
       <h2>Files in this share</h2>
       ${trashedFiles ? html`<p class="hint section-hint">${trashedFiles === 1 ? '1 file is' : `${trashedFiles} files are`} in the <a href="#/trash">trash</a>, so visitors don’t see ${trashedFiles === 1 ? 'it' : 'them'}. Restore ${trashedFiles === 1 ? 'it' : 'them'} to share ${trashedFiles === 1 ? 'it' : 'them'} again.</p>` : ''}
@@ -860,7 +871,7 @@ function showCreatedShare(s) {
   showModal(html`${modalHead('Share link ready')}
     <div class="modal-body">
       <div class="banner">${icon('check')}<div><strong>${s.name}</strong><div class="small muted">${[plural(files.length, 'file'), bytes(total(files)), s.expires ? `expires ${date(s.expires)}` : 'never expires', s.password && 'password protected'].filter(Boolean).join(' · ')}</div></div></div>
-      ${linkPanel(url, shareSnippets(url, s), `/s/${s.token}`)}
+      ${linkPanel(url, s.name, shareSnippets(url, s), `/s/${s.token}`)}
     </div>
     <div class="modal-foot"><a class="btn" href="#/share-links/${s.id}" data-action="close-modal">View link details</a><button type="button" class="btn btn-primary" data-action="close-modal">Done</button></div>`);
 }
@@ -915,6 +926,12 @@ const actions = {
   delete: (el) => confirmDelete(el.dataset.ids.split(',')),
   'delete-selected': () => confirmDelete([...state.selected]),
   'close-modal': () => modal.close(),
+  'toggle-qr': (el) => {
+    const panel = el.closest('.link-panel').querySelector('[data-qr]');
+    panel.hidden = !panel.hidden;
+    el.setAttribute('aria-expanded', b(!panel.hidden));
+  },
+  'download-qr': (el) => downloadQr(el.dataset.url, `${slug(el.dataset.name)}-qr-code.png`),
   confirm: () => {
     const fn = pendingConfirm;
     pendingConfirm = null;
