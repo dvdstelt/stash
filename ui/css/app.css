@@ -383,7 +383,10 @@ dialog.modal > form { display: flex; flex: 1; flex-direction: column; min-height
 /* minmax(0, 1fr): a long command scrolls in its box instead of widening the panel and its dialog. */
 .link-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .linkbox { display: flex; flex-wrap: wrap; gap: 8px; }
-.linkbox .input { flex: 1 1 260px; min-width: 0; font-size: 13px; }
+.link-field { position: relative; flex: 1 1 260px; min-width: 0; }
+.link-field .input { padding-right: 44px; font-size: 13px; cursor: pointer; }
+.link-field .input:hover { border-color: var(--accent); }
+.link-field .icon-btn { position: absolute; top: 2px; right: 2px; }
 .linkbox-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .linkbox .btn[aria-expanded="true"] { background: var(--surface-2); }
 /* The code stays dark on white in the dark theme too: not every phone reads a light-on-dark code. */

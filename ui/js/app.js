@@ -2,7 +2,7 @@
 
 const {
   html, raw, b, icon, bytes, rel, date, kindOf, thumb, previewMedia,
-  snippetTabs, uploadSnippets, shareSnippets, toast, delegate, hydrateIcons,
+  snippetTabs, uploadSnippets, shareSnippets, toast, copy, delegate, hydrateIcons,
   uploadRow, updateUploadRow, dropZone, slug, qrSvg, downloadQr,
 } = window.StashUI;
 const { store, uploadUrl, shareUrl, MB, GB, TB } = window.StashData;
@@ -137,9 +137,11 @@ function confirmModal({ title, body, confirm, onConfirm }) {
 function linkPanel(url, name, snippets, previewHref) {
   return html`<div class="link-panel">
     <div class="linkbox">
-      <input class="input mono" readonly value="${url}" aria-label="Link" data-action="select-text">
+      <div class="link-field">
+        <input class="input mono" readonly value="${url}" aria-label="Link, click to copy" title="Click to copy" data-action="copy-link">
+        <button type="button" class="icon-btn btn-ghost" data-action="copy-link" aria-label="Copy link" title="Copy link">${icon('copy')}</button>
+      </div>
       <div class="linkbox-actions">
-        <button type="button" class="btn" data-action="copy" data-text="${url}" data-msg="Link copied">${icon('copy')} Copy link</button>
         <button type="button" class="btn btn-ghost" data-action="toggle-qr" aria-expanded="false" title="Show the link as a QR code, to open it on a phone or print it">${icon('qr')} QR code</button>
         <a class="btn btn-ghost" href="${previewHref}" target="_blank" rel="noopener" title="Open the page the recipient sees">${icon('external')} Preview</a>
       </div>
@@ -926,6 +928,12 @@ const actions = {
   delete: (el) => confirmDelete(el.dataset.ids.split(',')),
   'delete-selected': () => confirmDelete([...state.selected]),
   'close-modal': () => modal.close(),
+  // A click anywhere on the link copies it, and selects it to show what was copied.
+  'copy-link': (el) => {
+    const input = el.closest('.link-field').querySelector('input');
+    input.select();
+    copy(input.value, 'Link copied');
+  },
   'toggle-qr': (el) => {
     const panel = el.closest('.link-panel').querySelector('[data-qr]');
     panel.hidden = !panel.hidden;
