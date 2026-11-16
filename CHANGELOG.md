@@ -14,7 +14,7 @@ Stash reads this file, so keep to its format:
   ui/js/ui.js.
 -->
 
-## 1.3.0
+## 1.3.0 - 2026-11-16
 
 ### Links show their name in chat apps
 <!-- icon: link -->
