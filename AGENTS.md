@@ -72,8 +72,8 @@ Stash is meant for people who aren't developers, and for the strangers they send
 - Command examples for link recipients cover macOS/Linux (`curl`), Windows (`curl.exe`), PowerShell
   7 and wget. Use `YOUR-PASSWORD` as the placeholder: PowerShell strips `<password>` from error
   messages.
-- When behavior changes, update the [README](README.md) for users and `docs/technical.md` for
-  developers in the same change.
+- When behavior changes, update the user guides (`docs/using.md`, `docs/installing.md`, and the
+  README's feature list) and `docs/technical.md` for developers in the same change.
 
 ## Commits
 
