@@ -460,7 +460,8 @@ The tests don't cover the page scripts. After changing those, check by hand:
 5. In a folder with files and a subfolder, tick all files with Ctrl+A, with the list's header
    checkbox, and with **Select all** in the grid's selection bar. Only the folder's own files are
    ticked. Ctrl+A in the search box still selects the text there. Ctrl+click a file to tick and
-   untick it, and a folder to check that nothing happens.
+   untick it, and a folder to check that nothing happens. Tick a file, Shift+click another a few
+   files on, and check that the files in between are ticked and no page text is selected.
 6. Create a share link, open it, and download one file and the zip. Share a folder with a
    subfolder, add a file to it, and check that the share page shows it under the subfolder's name.
 7. Show a link's QR code, scan it with a phone, and download the image.
