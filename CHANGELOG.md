@@ -14,7 +14,7 @@ Stash reads this file, so keep to its format:
   ui/js/ui.js.
 -->
 
-## 1.3.1
+## 1.3.1 - 2026-11-16
 
 ### Stash's own icon
 <!-- icon: sparkles -->
