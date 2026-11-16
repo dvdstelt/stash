@@ -67,7 +67,8 @@ func (srv *server) handleState(w http.ResponseWriter, r *http.Request) {
 		Origin    string `json:"origin"`
 		TrashDays int    `json:"trashDays"`
 		Version   string `json:"version"`
-		WhatsNew  bool   `json:"whatsNew"` // What's new has something the owner hasn't seen
+		WhatsNew  bool   `json:"whatsNew"`          // What's new has something the owner hasn't seen
+		Scanner   string `json:"scanner,omitempty"` // "mark" or "refuse" when files are checked for viruses
 	}{
 		Items: []*Item{}, Links: []linkView{}, Shares: []shareView{}, Origin: srv.origin(r), TrashDays: srv.cfg.TrashDays,
 		Version: srv.releases[0].Version, WhatsNew: srv.isNew(srv.releases[0]),
@@ -83,6 +84,9 @@ func (srv *server) handleState(w http.ResponseWriter, r *http.Request) {
 	}
 	state.Storage.Used = srv.st.usedBytes()
 	state.Storage.Free = srv.spaceLeft()
+	if srv.scan != nil {
+		state.Scanner = srv.cfg.VirusAction
+	}
 	writeJSON(w, http.StatusOK, state)
 }
 

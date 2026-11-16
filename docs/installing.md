@@ -142,6 +142,52 @@ makes each next try wait longer. It also writes every wrong password to its log 
 came from, so `podman logs stash` shows you when it happens. The technical guide shows how to block
 those addresses automatically with fail2ban.
 
+## Checking received files for viruses
+
+Stash can have every file that comes in through an upload link checked for viruses by
+[ClamAV](https://www.clamav.net), a free virus scanner. ClamAV isn't part of Stash: it runs next to
+it in a container of its own, and keeps its list of viruses up to date by itself. It needs a 64-bit
+computer (Intel, AMD, or ARM such as a Raspberry Pi 4 or 5 with a 64-bit system) and at least 3 GB
+of memory, so check that yours has room.
+
+**1. Make a network for the two of them**, so Stash can reach ClamAV by its name, and nothing
+outside can:
+
+```bash
+podman network create stash-net
+```
+
+**2. Start ClamAV.** The `clamav-db` volume keeps its list of viruses, so it doesn't have to
+download it all again when you update ClamAV:
+
+```bash
+podman run -d --name clamav --network stash-net -v clamav-db:/var/lib/clamav docker.io/clamav/clamav-debian
+```
+
+**3. Start Stash again**, on the same network, and tell it where ClamAV is:
+
+```bash
+podman rm -f stash
+podman run -d --name stash --network stash-net -p 8080:8080 -v stash-data:/data -e STASH_CLAMD=clamav:3310 docker.io/dvdstelt/stash
+```
+
+If you keep your files in a folder, use your `-v`, `--userns` and `--user` options instead of
+`-v stash-data:/data`. Stash's log now says it's checking files for viruses. The first time, ClamAV
+takes a few minutes to get ready. Files that come in meanwhile are checked as soon as it is.
+
+What happens to a file with a virus is up to you:
+
+- **Kept and marked**, the standard. The file shows **Virus found** and the name of the virus. You
+  can still download it, for example when you're sure it's a false alarm, but it never opens in the
+  browser, and share links leave it out.
+- **Refused**: add `-e STASH_VIRUS_ACTION=refuse` to the `podman run` command. The person sending
+  the file is told it wasn't accepted, and it isn't kept. If ClamAV can't be reached at that moment,
+  the file is kept and checked later. Should it turn out to have a virus, it's marked instead.
+
+ClamAV checks files up to 100 MB unless you raise its limits. Larger files show **Not checked: too
+large**. The [technical guide](technical.md#virus-scanning) shows how to raise them, and how to start
+both containers automatically.
+
 ## Forgot your password?
 
 Stop Stash, remove the password, and start it again. The log then shows a new setup link:
@@ -167,5 +213,6 @@ Stash works without any settings. These two matter once it's on the internet:
 
 Pass them with `-e NAME=value` in the `podman run` command, or put them in a file and use
 `--env-file`. To keep deleted files in the trash for another number of days than 30, set
-`STASH_TRASH_DAYS`, for example `-e STASH_TRASH_DAYS=7`. The
+`STASH_TRASH_DAYS`, for example `-e STASH_TRASH_DAYS=7`. `STASH_CLAMD` and `STASH_VIRUS_ACTION` turn
+on [checking for viruses](#checking-received-files-for-viruses). The
 [technical guide](technical.md#settings) lists all settings.

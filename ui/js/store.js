@@ -16,6 +16,7 @@ let origin = location.origin;
 let trashDays = 30;
 let version = '';
 let whatsNew = false;
+let scanner = '';
 
 const contentUrl = (id) => `/api/files/${encodeURIComponent(id)}/content`;
 const uploadUrl = (r) => `${origin}/d/${r.token}`;
@@ -31,9 +32,9 @@ function ingest(state) {
   };
   for (const it of items.values()) {
     if (it.type !== 'file') continue;
-    // A PDF that came through an upload link, also in a folder that came with it, is sent as a
-    // download, so there is nothing to show inline.
-    const downloadOnly = kindOf(it.name) === 'pdf' && underLink(it);
+    // A file with a virus, and a PDF that came through an upload link, also in a folder that came
+    // with it, are sent as a download, so there is nothing to show inline.
+    const downloadOnly = it.scan === 'virus' || (kindOf(it.name) === 'pdf' && underLink(it));
     if (PREVIEWABLE.has(kindOf(it.name)) && !downloadOnly) it.src = contentUrl(it.id);
     const before = previous.get(it.id);
     if (before?.text !== undefined) it.text = before.text; // keep text previews already fetched
@@ -45,9 +46,12 @@ function ingest(state) {
   trashDays = state.trashDays;
   version = state.version;
   whatsNew = state.whatsNew;
+  scanner = state.scanner ?? '';
 }
 
 const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
+
+const hasVirus = (it) => it.scan === 'virus';
 
 /** The files in a folder and in the folders in there, leaving out what's in the trash. */
 function filesBelow(folder) {
@@ -171,6 +175,9 @@ const store = {
     await this.load();
   },
 
+  /** "mark" or "refuse" when received files are checked for viruses, or "" when they aren't. */
+  scanner: () => scanner,
+
   // Upload links
   requests: () => [...links].sort((a, b) => b.created - a.created),
   request: (id) => links.find((r) => r.id === id),
@@ -206,14 +213,19 @@ const store = {
   share: (id) => shares.find((s) => s.id === id),
   /**
    * The files a share link offers: its files, or everything in its folder and the folders in
-   * there. Files in the trash are left out, as they are for visitors.
+   * there. Files in the trash, and files with a virus, are left out, as they are for visitors.
    */
   shareFiles(s) {
+    return this.sharedOrNot(s).filter((it) => !hasVirus(it));
+  },
+  sharedInTrash(s) { return s.files.filter((id) => items.has(id) && this.inTrash(id)).length; },
+  /** Files a share link would offer, if the virus scanner hadn't found a virus in them. */
+  sharedWithVirus(s) { return this.sharedOrNot(s).filter(hasVirus).length; },
+  sharedOrNot(s) {
     if (!s.folder) return s.files.map((id) => items.get(id)).filter((it) => it && !this.inTrash(it.id));
     if (!items.has(s.folder) || this.inTrash(s.folder)) return [];
     return filesBelow(s.folder);
   },
-  sharedInTrash(s) { return s.files.filter((id) => items.has(id) && this.inTrash(id)).length; },
 
   shareStatus(s) {
     if (s.revoked) return 'revoked';

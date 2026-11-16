@@ -16,6 +16,13 @@ Stash reads this file, so keep to its format:
 
 ## 1.3.0
 
+### Check received files for viruses
+<!-- icon: shield -->
+Stash can have every file that comes in through an upload link checked for viruses by ClamAV, a
+free virus scanner that runs next to it. A file with a virus is kept and marked, or refused, as you
+choose. A marked file never opens in the browser, and share links leave it out. The installation
+guide shows how to set it up.
+
 ### See what's new after an update
 <!-- icon: sparkles -->
 After an update, Stash opens a window with what the new version brings. **Remind me later** shows

@@ -76,6 +76,8 @@ that's easy to back up. Stash is one small program for one owner, with one passw
 
 - Files from strangers never run in your browser: web pages, SVG images and anything else that could
   contain code are always downloaded, and so are PDFs that came through an upload link.
+- Optionally, files people send you are checked for viruses by ClamAV. A file with a virus is
+  refused, or kept, marked and left out of share links: you choose.
 - Password guessing is slowed down, and every wrong password is logged, so fail2ban can block it.
 - Password-protected links show nothing but their name until the password is right.
 - One Go program without dependencies, in an image of about 8 MB for Intel, AMD and ARM, including
