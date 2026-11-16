@@ -252,7 +252,8 @@ function listView(items, { selectable = true, showPath = false } = {}) {
 /** The files that can be ticked in the view on screen. */
 function selectableFiles() {
   if (state.query) return store.search(state.query).filter((it) => it.type === 'file');
-  const { section, id = 'root' } = route();
+  const { section, id: folderId } = route();
+  const id = folderId ?? 'root'; // My files has no ID in the address: route() says null, not undefined
   const folder = store.item(id);
   if (section !== 'files' || folder?.type !== 'folder' || store.inTrash(id)) return [];
   return store.children(id).filter((it) => it.type === 'file');
