@@ -16,6 +16,8 @@ type ownerState struct {
 	Storage   struct{ Used, Free int64 }
 	Origin    string
 	TrashDays int
+	Version   string
+	WhatsNew  bool
 }
 
 func (e *testEnv) state() ownerState {

@@ -26,7 +26,7 @@ Everything lives in one folder (`-data`, `/data` in the container):
 
 | Path | Contents |
 |---|---|
-| `stash.json` | All metadata: files and folders, upload links, share links, the owner's password hash, and a random secret for signing cookies. |
+| `stash.json` | All metadata: files and folders, upload links, share links, the owner's password hash, a random secret for signing cookies, and the newest version whose What's new the owner closed with Got it. |
 | `files/<id>` | The contents of each file, named by a random ID. Names, folders and dates are only in `stash.json`. Files in the trash stay here until they're deleted for good. |
 | `uploads/<id>.part` | Uploads in progress. Cleared when Stash starts, because an upload can't continue after a restart. |
 
@@ -47,8 +47,11 @@ Every setting is a command-line flag or an environment variable.
 | `-trash-days` | `STASH_TRASH_DAYS` | `30` | Days that deleted files and folders stay in the trash before they're deleted for good. From 1 to 3650. |
 | `-ui-dir` | `STASH_UI_DIR` | built in | Serve the pages from this folder instead of the embedded copy. For development. |
 
-Subcommand: `stash reset-password [-data DIR]` removes the owner password. Run it while Stash is
-stopped; the next start prints a new setup link.
+Subcommands:
+
+- `stash reset-password [-data DIR]` removes the owner password. Run it while Stash is stopped; the
+  next start prints a new setup link.
+- `stash version` prints the version. In the container: `podman exec stash /stash version`.
 
 ## Running in production
 
@@ -237,6 +240,21 @@ Some limits to know:
 - Files in the trash still take up disk space. They don't count against an upload link's limit, so
   deleting received files makes room on the link again.
 
+## What's new
+
+After an update, the owner's pages open a window with what the new version brings, taken from the
+built-in `CHANGELOG.md`. **Remind me later**, or closing the window, leaves it to open again on the
+next visit. **Got it** saves the running version as `seenVersion` in `stash.json`, so it holds in
+every browser, and the window stays closed until a newer version runs. Then it shows every version
+after `seenVersion` as new. The version number at the bottom of the menu opens it at any time.
+
+- **Updating from before 1.3.0.** Older versions didn't save `seenVersion`, so there's no telling
+  which version the owner updated from. Only the newest version counts as new.
+- **A new Stash** saves `seenVersion` when the owner chooses the first password: there's no update
+  to catch up on.
+- **Going back to an older version** keeps the newer `seenVersion`, so going forward again doesn't
+  show the same news twice.
+
 ## The trash
 
 Deleting a file or folder moves it to the trash. Only the item the owner deleted gets a `trashed`
@@ -325,7 +343,7 @@ status 200. That's 200 rather than 201, because wget2 doesn't print the reply of
 | `GET /api/session` | `{signedIn, setupRequired}` |
 | `POST /api/setup` | `{token, password}`: set the first password |
 | `POST /api/login`, `POST /api/logout` | Sign in and out |
-| `GET /api/state` | Everything: items, links, shares, storage, public origin |
+| `GET /api/state` | Everything: items, links, shares, storage, public origin, the version, and whether What's new has something the owner hasn't seen (`whatsNew`) |
 | `POST /api/folders` | `{parent, name}` |
 | `PATCH /api/items/<id>` | `{name}`: rename a file or folder. A name already taken in that folder is refused. Renaming an upload link's folder renames the link too. |
 | `POST /api/items/trash` | `{ids}`: move files and folders to the trash |
@@ -336,6 +354,8 @@ status 200. That's 200 rather than 201, because wget2 doesn't print the reply of
 | `POST /api/uploads`, `GET`/`PUT`/`DELETE /api/uploads/<id>` | Chunked upload |
 | `POST /api/links`, `PATCH /api/links/<id>` | Create or change an upload link |
 | `POST /api/shares`, `PATCH /api/shares/<id>` | Create or change a share link |
+| `GET /api/releases` | The changelog for What's new: `{version, releases}`, newest first. Each release has `version`, `date` (empty until it's released), `new`, and `changes` with a `title`, an `icon` and a `body` of paragraphs (`text`) and lists (`list`). |
+| `POST /api/releases/seen` | Got it: What's new doesn't open by itself again until a newer version runs |
 
 Link fields: `name`, `quota` (bytes), `maxFiles`, `expiresDays` (0 means never), `password` (an
 empty string removes it), `message`, `revoked`. Share links use `maxDownloads` instead of `quota`
@@ -388,12 +408,13 @@ Resuming doesn't count either, from the browser that started the download (see
 
 | Path | Contents |
 |---|---|
-| `main.go` | Settings, startup, `reset-password` |
+| `main.go` | Settings, startup, `reset-password` and `version` |
 | `server.go` | Routes, pages, sign-in, serving file contents, housekeeping |
 | `store.go` | Data model and `stash.json` |
 | `auth.go` | Password hashing, sessions, unlock cookies, guessing limits, visitor address |
 | `uploads.go` | Space reservations, chunked and command-line uploads |
 | `api_owner.go`, `api_public.go` | The owner's interface, and the link and share pages |
+| `changelog.go` | Reading `CHANGELOG.md`, which is built in and gives Stash its version |
 | `disk_*.go` | Free disk space, per operating system |
 | `*_test.go` | Tests, with the shared helpers in `helpers_test.go` |
 | `ui/` | The pages: `index.html` (owner), `upload.html`, `share.html`, `login.html`, with `js/` and `css/` |
@@ -469,21 +490,33 @@ The tests don't cover the page scripts. After changing those, check by hand:
 7. Show a link's QR code, scan it with a phone, and download the image.
 8. Delete a shared file and a folder from their menu. Check that the share page leaves the file
    out, restore both from the Trash, and empty the trash.
-9. Look at the browser console for errors.
+9. Open What's new with the version number at the bottom of the menu. To see it open by itself,
+   stop Stash, remove `seenVersion` from `stash.json` and start it again. Check that **Remind me
+   later** brings it back on the next reload, and that **Got it** doesn't.
+10. Look at the browser console for errors.
 
 [AGENTS.md](../AGENTS.md) lists the conventions and the security rules changes must keep.
 
 ### Releasing
 
-Pushing a version tag publishes the image to Docker Hub:
+Stash has no version setting: it reads `CHANGELOG.md`, which is built in, and is the newest version
+listed there. So a change that people notice also gets a line in `CHANGELOG.md`, under the version
+it will be released in. That's also what the owner sees in What's new after updating. The first such change after a release adds the next version's heading. The
+format is explained at the top of the file, and the tests check it.
+
+To release, add the date to the newest version's heading (`## 1.3.0 - 2026-11-20`), commit, and
+push a tag for that version. That publishes the image to Docker Hub:
 
 ```bash
-git tag -a v1.2.0 -m "Stash 1.2.0"
-git push origin v1.2.0
+git tag -a v1.3.0 -m "Stash 1.3.0"
+git push origin v1.3.0
 ```
 
+The workflow refuses a tag that doesn't match the newest version in `CHANGELOG.md`. A prerelease
+such as `v1.3.0-rc.1` matches `1.3.0`.
+
 The workflow in `.github/workflows/publish-image.yml` builds all three platforms and pushes
-`docker.io/dvdstelt/stash` with the tags `1.2.0`, `1.2`, `1` and `latest`. A `0.x` version gets no
+`docker.io/dvdstelt/stash` with the tags `1.3.0`, `1.3`, `1` and `latest`. A `0.x` version gets no
 major-only tag, and a prerelease such as `v1.3.0-rc.1` gets only its own tag, never `latest`. People
 who want to stay on one major version can run `docker.io/dvdstelt/stash:1`.
 

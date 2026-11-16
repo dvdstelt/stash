@@ -70,24 +70,26 @@ const (
 )
 
 type dbFile struct {
-	Version   int      `json:"version"`
-	Secret    string   `json:"secret"`
-	OwnerHash string   `json:"ownerPasswordHash,omitempty"`
-	Items     []*Item  `json:"items"`
-	Links     []*Link  `json:"links"`
-	Shares    []*Share `json:"shares"`
+	Version     int      `json:"version"`
+	Secret      string   `json:"secret"`
+	OwnerHash   string   `json:"ownerPasswordHash,omitempty"`
+	SeenVersion string   `json:"seenVersion,omitempty"`
+	Items       []*Item  `json:"items"`
+	Links       []*Link  `json:"links"`
+	Shares      []*Share `json:"shares"`
 }
 
 // store holds all metadata in memory and writes it to <data>/stash.json after every change.
 // Callers hold mu while reading or changing anything.
 type store struct {
-	mu        sync.Mutex
-	dir       string
-	secret    []byte // key for signing "unlocked" cookies of password-protected links
-	ownerHash string
-	items     map[string]*Item
-	links     []*Link
-	shares    []*Share
+	mu          sync.Mutex
+	dir         string
+	secret      []byte // key for signing "unlocked" cookies of password-protected links
+	ownerHash   string
+	seenVersion string // the newest version whose What's new the owner closed with Got it
+	items       map[string]*Item
+	links       []*Link
+	shares      []*Share
 }
 
 func openStore(dir string) (*store, error) {
@@ -111,7 +113,7 @@ func openStore(dir string) (*store, error) {
 		if st.secret, err = base64.RawStdEncoding.DecodeString(db.Secret); err != nil || len(st.secret) < 32 {
 			return nil, fmt.Errorf("reading %s: invalid secret", st.dbPath())
 		}
-		st.ownerHash = db.OwnerHash
+		st.ownerHash, st.seenVersion = db.OwnerHash, db.SeenVersion
 		for _, it := range db.Items {
 			st.items[it.ID] = it
 		}
@@ -136,7 +138,7 @@ func (st *store) partPath(id string) string { return filepath.Join(st.dir, "uplo
 // save writes the metadata to a temporary file and renames it over the old one,
 // so a crash never leaves a half-written file behind.
 func (st *store) save() error {
-	db := dbFile{Version: 1, Secret: base64.RawStdEncoding.EncodeToString(st.secret), OwnerHash: st.ownerHash, Links: st.links, Shares: st.shares}
+	db := dbFile{Version: 1, Secret: base64.RawStdEncoding.EncodeToString(st.secret), OwnerHash: st.ownerHash, SeenVersion: st.seenVersion, Links: st.links, Shares: st.shares}
 	for _, it := range st.items {
 		db.Items = append(db.Items, it)
 	}

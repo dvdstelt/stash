@@ -23,6 +23,15 @@ see the [installation guide](installing.md).
   after that, it's deleted for good. **Empty trash** deletes everything in it right away.
 - Use the search box at the top to find files. Pressing `/` jumps to it.
 
+## What's new
+
+After an update, Stash opens a window with what the new version brings, the first time you open it.
+Click **Got it** when you've read it, and it won't open by itself again until the next update. Click
+**Remind me later** to see it again next time.
+
+The version number at the bottom of the menu shows which version is running. Click it to read
+what's new again, also for earlier versions. A dot next to it means there's news you haven't seen.
+
 ## Asking someone for files: upload links
 
 1. Go to **Upload links** and click **New upload link**.

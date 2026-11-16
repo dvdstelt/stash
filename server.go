@@ -40,6 +40,10 @@ type server struct {
 	// When each counted share download stops being resumable for free, keyed by resumeKey.
 	// Guarded by st.mu.
 	resumes map[string]time.Time
+
+	// What's in the changelog, newest first. Guarded by st.mu, only because the tests swap in
+	// their own.
+	releases []release
 }
 
 func newServer(cfg config) (*server, error) {
@@ -70,6 +74,7 @@ func newServer(cfg config) (*server, error) {
 		reserved: map[string]int64{},
 		pending:  map[string]int{},
 		resumes:  map[string]time.Time{},
+		releases: releases,
 	}
 	if st.ownerHash == "" {
 		srv.setupToken = newID()
@@ -119,6 +124,8 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("PATCH /api/links/{id}", srv.owner(srv.handleUpdateLink))
 	mux.HandleFunc("POST /api/shares", srv.owner(srv.handleCreateShare))
 	mux.HandleFunc("PATCH /api/shares/{id}", srv.owner(srv.handleUpdateShare))
+	mux.HandleFunc("GET /api/releases", srv.owner(srv.handleReleases))
+	mux.HandleFunc("POST /api/releases/seen", srv.owner(srv.handleReleasesSeen))
 
 	// Anyone with an upload link
 	mux.HandleFunc("GET /api/public/d/{token}", srv.handlePublicLink)
@@ -234,6 +241,7 @@ func (srv *server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	srv.st.ownerHash, srv.setupToken = hash, ""
+	srv.seen() // someone who just installed Stash has no update to catch up on
 	err = srv.st.save()
 	srv.st.mu.Unlock()
 	if err != nil {

@@ -29,11 +29,17 @@ type config struct {
 }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "reset-password" {
-		if err := resetPassword(os.Args[2:]); err != nil {
-			log.Fatal(err)
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "reset-password":
+			if err := resetPassword(os.Args[2:]); err != nil {
+				log.Fatal(err)
+			}
+			return
+		case "version", "-version", "--version":
+			fmt.Println("Stash " + version)
+			return
 		}
-		return
 	}
 
 	cfg, err := loadConfig("stash", os.Args[1:])
@@ -64,7 +70,7 @@ func main() {
 		httpServer.Shutdown(shutdownCtx)
 	}()
 
-	log.Printf("Stash is listening on %s, storing data in %s", cfg.Listen, cfg.DataDir)
+	log.Printf("Stash %s is listening on %s, storing data in %s", version, cfg.Listen, cfg.DataDir)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
