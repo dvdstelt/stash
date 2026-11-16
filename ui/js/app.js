@@ -15,6 +15,7 @@ const searchInput = $('#search');
 const state = {
   layout: load('layout') === 'list' ? 'list' : 'grid',
   selected: new Set(),
+  anchor: null, // the file ticked or unticked last, where a Shift+click range starts
   linkFilter: 'all',
   query: '',
   folder: 'root',
@@ -257,6 +258,31 @@ function selectableFiles() {
   const folder = store.item(id);
   if (section !== 'files' || folder?.type !== 'folder' || store.inTrash(id)) return [];
   return store.children(id).filter((it) => it.type === 'file');
+}
+
+function toggleSelected(id, on) {
+  if (on) state.selected.add(id);
+  else state.selected.delete(id);
+  state.anchor = id;
+  render();
+}
+
+/**
+ * Shift+click, as in a mail app: every file from the one ticked or unticked last up to this one
+ * gets the state this one gets. The range follows the checkboxes on screen, in their order, so
+ * folders in between are skipped. Without a last file on screen, it's an ordinary tick.
+ */
+function selectRange(id, on) {
+  const shown = [...viewEl.querySelectorAll('[data-action="select"]')].map((box) => box.dataset.id);
+  const from = shown.indexOf(state.anchor);
+  const to = shown.indexOf(id);
+  if (from < 0 || to < 0) return toggleSelected(id, on);
+  for (const file of shown.slice(Math.min(from, to), Math.max(from, to) + 1)) {
+    if (on) state.selected.add(file);
+    else state.selected.delete(file);
+  }
+  state.anchor = id;
+  render();
 }
 
 function selectAll(on = true) {
@@ -976,20 +1002,25 @@ const actions = {
     if (menu?.trigger === el) closeMenu();
     else openMenu(el.dataset.id, el);
   },
-  open: (el) => {
+  open: (el, e) => {
     const it = store.item(el.dataset.id);
     if (!it) return;
+    // Ctrl+click, or Cmd+click on a Mac, ticks or unticks a file, as in a file manager. (Ctrl+click
+    // on a Mac is a right-click, which opens the menu.) Shift+click does a range. Folders have no
+    // checkbox, so these leave them alone rather than opening one, which would drop the files
+    // ticked so far.
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      const box = el.querySelector('[data-action="select"]');
+      if (box) (e.shiftKey ? selectRange : toggleSelected)(it.id, !box.checked);
+      if (box || it.type === 'folder') return;
+    }
     if (it.type === 'folder') navigate(`#/files/${it.id}`);
     else openPreview(it.id);
   },
-  select: (el) => {
-    if (el.checked) state.selected.add(el.dataset.id);
-    else state.selected.delete(el.dataset.id);
-    render();
-  },
+  select: (el, e) => (e.shiftKey ? selectRange : toggleSelected)(el.dataset.id, el.checked),
   // The header checkbox ticks or unticks everything; the button in the selection bar only ticks.
   'select-all': (el) => selectAll(el.type === 'checkbox' ? el.checked : true),
-  'clear-selection': () => { state.selected.clear(); render(); },
+  'clear-selection': () => { state.selected.clear(); state.anchor = null; render(); },
   layout: (el) => { state.layout = el.dataset.layout; save('layout', state.layout); render(); },
   'remove-upload': (el) => {
     const i = uploads.findIndex((u) => u.id === Number(el.dataset.id));
@@ -1140,6 +1171,7 @@ delegate(actions, submits);
 
 window.addEventListener('hashchange', () => {
   state.selected.clear();
+  state.anchor = null;
   clearSearch();
   if (modal.open) modal.close();
   render();
@@ -1167,6 +1199,12 @@ document.addEventListener('keydown', (e) => {
 });
 
 modal.addEventListener('click', (e) => { if (e.target === modal) modal.close(); });
+
+// Shift+click on a file ticks a range. Without this, the browser would also select the page's text
+// between the two clicks.
+document.addEventListener('mousedown', (e) => {
+  if (e.shiftKey && e.target.closest('#view [data-action="open"]')?.querySelector('[data-action="select"]')) e.preventDefault();
+});
 
 // The menu of a file or folder: right-click opens it, and any click closes it again, after the
 // chosen action ran. The ⋯ buttons open and close it themselves.
