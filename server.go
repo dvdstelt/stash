@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"io"
 	"io/fs"
 	"log"
@@ -165,11 +167,34 @@ const pageCSP = "default-src 'self'; img-src 'self' blob: data:; media-src 'self
 	"style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; " +
 	"form-action 'self'; frame-ancestors 'none'"
 
-func (srv *server) servePage(w http.ResponseWriter, name string) {
+// linkPreview is what a chat app such as WhatsApp, Slack or Teams shows when someone pastes a link.
+// They read it from the page's Open Graph tags, because they don't run its scripts. It never says
+// more than the page shows before the password: the link's name, or that it can't be used.
+type linkPreview struct {
+	Title       string
+	Description string
+}
+
+// servePage sends one of the pages. The link pages are templates, filled in with the link's
+// preview; the template escapes every value.
+func (srv *server) servePage(w http.ResponseWriter, name string, preview *linkPreview) {
 	raw, err := fs.ReadFile(srv.ui, name)
 	if err != nil {
 		http.Error(w, "page not found", http.StatusNotFound)
 		return
+	}
+	if preview != nil {
+		var b bytes.Buffer
+		t, err := template.New(name).Parse(string(raw))
+		if err == nil {
+			err = t.Execute(&b, preview)
+		}
+		if err != nil {
+			log.Printf("The page %s is broken: %v", name, err)
+			http.Error(w, "page broken", http.StatusInternalServerError)
+			return
+		}
+		raw = b.Bytes()
 	}
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
@@ -195,14 +220,38 @@ func (srv *server) handleHome(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	srv.servePage(w, "index.html")
+	srv.servePage(w, "index.html", nil)
 }
 
 func (srv *server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
-	srv.servePage(w, "login.html")
+	srv.servePage(w, "login.html", nil)
 }
 
-func wantsHTML(r *http.Request) bool { return strings.Contains(r.Header.Get("Accept"), "text/html") }
+// previewBots are parts of the User-Agent of chat apps that fetch a pasted link to show a preview.
+// Not all of them ask for HTML, and they would get the instructions for a terminal instead. Anyone
+// can send these names, but that only gets them the page any browser gets.
+var previewBots = []string{
+	"WhatsApp",            // also Signal, which says it's WhatsApp
+	"facebookexternalhit", // Facebook, Messenger, Instagram and iMessage
+	"Slackbot",
+	"SkypeUriPreview", "MicrosoftPreview", // Teams and Outlook
+	"Discordbot", "TelegramBot", "Twitterbot", "LinkedInBot", "Mattermost",
+}
+
+// wantsHTML tells a browser, or a chat app making a preview, from a terminal: curl, wget and
+// PowerShell don't ask for HTML.
+func wantsHTML(r *http.Request) bool {
+	if strings.Contains(r.Header.Get("Accept"), "text/html") {
+		return true
+	}
+	ua := r.Header.Get("User-Agent")
+	for _, bot := range previewBots {
+		if strings.Contains(ua, bot) {
+			return true
+		}
+	}
+	return false
+}
 
 /* ---------- Signing in ---------- */
 
