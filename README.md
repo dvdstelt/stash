@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/stash-icon.svg" alt="" width="96" height="96">
+<img src="docs/images/stash-icon-256.png" alt="" width="128" height="128">
 
 # Stash
 
