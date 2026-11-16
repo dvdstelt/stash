@@ -203,21 +203,16 @@ type limiter struct {
 
 type failures struct {
 	count int
+	delay time.Duration // how long the attempt after the last one has to wait
 	until time.Time
 	last  time.Time
 }
 
-func (l *limiter) wait(key string) time.Duration {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if f := l.fails[key]; f != nil {
-		return time.Until(f.until)
-	}
-	return 0
-}
-
-// fail counts a wrong password, and returns how long the next attempt has to wait, if at all.
-func (l *limiter) fail(key string) time.Duration {
+// attempt counts a password that's about to be checked as a wrong one, or returns how long the
+// visitor has to wait first; succeed takes the count back when the password turns out right.
+// Counting before the check matters: a check takes a good part of a second, so counting only
+// afterwards let through every guess that was sent while the first ones were still being checked.
+func (l *limiter) attempt(key string) (wait time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	f := l.fails[key]
@@ -225,14 +220,36 @@ func (l *limiter) fail(key string) time.Duration {
 		f = &failures{}
 		l.fails[key] = f
 	}
+	if wait := time.Until(f.until); wait > 0 {
+		return wait
+	}
 	f.count++
 	f.last = time.Now()
-	if f.count < 5 {
-		return 0
+	if f.count >= 5 {
+		f.delay = min(time.Second<<min(f.count-5, 10), 15*time.Minute)
+		f.until = f.last.Add(f.delay)
 	}
-	delay := min(time.Second<<min(f.count-5, 10), 15*time.Minute)
-	f.until = time.Now().Add(delay)
-	return delay
+	return 0
+}
+
+// uncount takes back an attempt whose password couldn't be checked, because Stash was too busy.
+// A wait that started with it stays.
+func (l *limiter) uncount(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if f := l.fails[key]; f != nil && f.count > 0 {
+		f.count--
+	}
+}
+
+// penalty is how long the next attempt has to wait after the one just counted, if at all.
+func (l *limiter) penalty(key string) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if f := l.fails[key]; f != nil && time.Now().Before(f.until) {
+		return f.delay
+	}
+	return 0
 }
 
 func (l *limiter) succeed(key string) {
@@ -241,13 +258,13 @@ func (l *limiter) succeed(key string) {
 	delete(l.fails, key)
 }
 
-// wrongPassword counts a wrong password for the owner's sign-in (kind "login") or a link, and logs
-// it with the visitor's address. That way the owner sees someone guessing, and tools like fail2ban
+// wrongPassword logs a wrong password for the owner's sign-in (kind "login") or a link, with the
+// visitor's address. The limiter counted it already, before it was checked. That way the owner sees someone guessing, and tools like fail2ban
 // can block them. The address comes before the link's name, so a filter finds it first. Attempts
 // turned away while a visitor has to wait aren't logged: they cost nothing, and would let anyone
 // fill the log.
 func (srv *server) wrongPassword(r *http.Request, key, kind, id string) {
-	wait := srv.limits.fail(key)
+	wait := srv.limits.penalty(key)
 	target := "signing in"
 	srv.st.mu.Lock()
 	switch kind {

@@ -272,32 +272,86 @@ func TestOwnerEndpointsNeedTheOwner(t *testing.T) {
 func TestLimiterBacksOff(t *testing.T) {
 	t.Parallel()
 	l := &limiter{fails: map[string]*failures{}}
-	for i := 0; i < 4; i++ {
-		l.fail("k")
-		if w := l.wait("k"); w > 0 {
-			t.Fatalf("waiting %v after %d failures; the first 4 are free", w, i+1)
+	waited := func() { l.fails["k"].until = time.Now() } // as if the wait is over
+	for i := 0; i < 5; i++ {
+		if w := l.attempt("k"); w > 0 {
+			t.Fatalf("attempt %d has to wait %v; the first 5 go ahead", i+1, w)
 		}
 	}
-	l.fail("k")
-	if w := l.wait("k"); w <= 0 || w > time.Second {
+	if w := l.attempt("k"); w <= 0 || w > time.Second {
 		t.Errorf("after 5 failures, wait %v; want up to 1s", w)
 	}
-	l.fail("k")
-	if w := l.wait("k"); w <= time.Second || w > 2*time.Second {
+	if got := l.fails["k"].count; got != 5 {
+		t.Errorf("an attempt that had to wait was counted: %d failures; want 5", got)
+	}
+	waited()
+	if w := l.attempt("k"); w != 0 {
+		t.Errorf("after waiting, the next attempt waits %v", w)
+	}
+	if w := l.attempt("k"); w <= time.Second || w > 2*time.Second {
 		t.Errorf("after 6 failures, wait %v; want up to 2s", w)
 	}
-	if w := l.wait("other"); w != 0 {
+	if w := l.attempt("other"); w != 0 {
 		t.Errorf("another key waits %v", w)
 	}
-	for i := 0; i < 40; i++ {
-		l.fail("k")
-	}
-	if w := l.wait("k"); w > 15*time.Minute || w < 14*time.Minute {
+	l.fails["k"].count = 45
+	waited()
+	l.attempt("k")
+	if w := l.attempt("k"); w > 15*time.Minute || w < 14*time.Minute {
 		t.Errorf("after many failures, wait %v; want 15 minutes at most", w)
 	}
+	l.uncount("k")
+	if got := l.fails["k"].count; got != 45 {
+		t.Errorf("after taking one attempt back, %d failures; want 45", got)
+	}
 	l.succeed("k")
-	if w := l.wait("k"); w != 0 {
+	if w := l.attempt("k"); w != 0 {
 		t.Errorf("after the right password, wait %v", w)
+	}
+}
+
+// Checking a password takes a while, and guesses sent at the same moment all arrive before the
+// first one is known to be wrong. They still count: only 5 are checked, through the pages and
+// from the command line alike.
+func TestGuessesAtOnceDontDodgeTheLimit(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	l := e.createLink(nil)
+	e.changeLink(l.ID, func(l *Link) { l.PasswordHash = fastHash("open sesame") })
+	guesses := map[string]func(i int) reply{
+		"signing in": func(i int) reply {
+			return e.sendJSON(newTerminal(), http.MethodPost, "/api/login", map[string]string{"password": fmt.Sprint("guess ", i)})
+		},
+		"a link's page and the command line": func(i int) reply {
+			if i%2 == 0 {
+				return e.sendJSON(newTerminal(), http.MethodPost, "/api/public/d/"+l.Token+"/unlock", map[string]string{"password": fmt.Sprint("guess ", i)})
+			}
+			return e.put(l.Token, "a.txt", strings.NewReader("a"), "Link-Password", fmt.Sprint("guess ", i))
+		},
+	}
+	for name, guess := range guesses {
+		statuses := make([]int, 40)
+		var wg sync.WaitGroup
+		for i := range statuses {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				statuses[i] = guess(i).status
+			}()
+		}
+		wg.Wait()
+		checked, turnedAway := 0, 0
+		for _, status := range statuses {
+			switch status {
+			case http.StatusUnauthorized:
+				checked++
+			case http.StatusTooManyRequests:
+				turnedAway++
+			}
+		}
+		if checked != 5 || turnedAway != len(statuses)-5 {
+			t.Errorf("%s: of %d guesses at once, %d were checked and %d turned away; want 5 checked", name, len(statuses), checked, turnedAway)
+		}
 	}
 }
 

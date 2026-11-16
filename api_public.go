@@ -92,13 +92,14 @@ func (srv *server) unlock(w http.ResponseWriter, r *http.Request, kind, id, hash
 		return
 	}
 	key := kind + ":" + id + "|" + srv.visitor(r)
-	if wait := srv.limits.wait(key); wait > 0 {
+	if wait := srv.limits.attempt(key); wait > 0 {
 		jsonError(w, http.StatusTooManyRequests, fmt.Sprintf("Too many wrong passwords. Try again in %s.", wait.Round(time.Second)))
 		return
 	}
 	if hash != "" {
 		ok, err := checkPassword(hash, in.Password)
 		if err != nil {
+			srv.limits.uncount(key)
 			status, msg := hashProblem(err, "Couldn't check the password.")
 			jsonError(w, status, msg)
 			return

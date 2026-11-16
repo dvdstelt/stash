@@ -213,6 +213,9 @@ Some limits to know:
   so taking a new address from it doesn't reset the count.
 - After 5 failures, each further attempt has to wait twice as long as the one before, up to 15
   minutes.
+- An attempt is counted before its password is checked, and taken back when the password is right.
+  Checking takes a good part of a second, so guesses sent at the same moment would otherwise all be
+  checked before the first one counted.
 - Nothing locks out everyone at once, so a stranger's guesses never keep the owner out. The flip
   side: someone with many addresses, such as a botnet or a larger IPv6 network, gets more guesses.
 - Every wrong password is logged with the visitor's address and what it was for, so the owner can

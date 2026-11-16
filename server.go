@@ -272,7 +272,7 @@ func (srv *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := "login|" + srv.visitor(r)
-	if wait := srv.limits.wait(key); wait > 0 {
+	if wait := srv.limits.attempt(key); wait > 0 {
 		jsonError(w, http.StatusTooManyRequests, fmt.Sprintf("Too many attempts. Try again in %s.", wait.Round(time.Second)))
 		return
 	}
@@ -281,6 +281,7 @@ func (srv *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	srv.st.mu.Unlock()
 	ok, err := checkPassword(hash, in.Password) // false without hashing while no password is set
 	if err != nil {
+		srv.limits.uncount(key)
 		status, msg := hashProblem(err, "Couldn't check the password.")
 		jsonError(w, status, msg)
 		return
