@@ -40,10 +40,6 @@ what's new again, also for earlier versions. A dot next to it means there's news
 3. Copy the link and send it. Or click **Show QR code**: a phone's camera opens the link from the code,
    and you can download the code to print it, for example on a sign at an event.
 
-When you paste the link into WhatsApp, Slack, Teams or another chat app, its preview shows the
-link's name, and nothing else: not your message, and not how much space is left. The chat app keeps
-that preview, also after you turn the link off, so choose a name you're happy for the chat to see.
-
 The person who opens the link sees your message, how much space is left, and an area to drag files
 or folders onto. They can't see files that are already there. If the link is full, has expired or
 was revoked, they get a clear message instead. A folder they upload arrives with the folders inside
@@ -80,8 +76,6 @@ accepted, and it never arrives.
 3. Copy the link and send it, or click **Show QR code** to open it on a phone or print it.
 
 They see the files with previews, and can download them one by one or all together as a zip file.
-Pasted into a chat app, the link shows its name, but never your message or the names of the files.
-Looking at that preview doesn't count as a download.
 A file you delete disappears from the link, and comes back if you restore it from the trash.
 
 A shared folder includes the folders inside it. The page shows each of them under its own heading,

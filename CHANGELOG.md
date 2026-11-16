@@ -21,13 +21,11 @@ Stash reads this file, so keep to its format:
 The top-left corner of every page shows Stash's icon, a chest full of files, instead of the
 briefcase. So do the pages that people open from your links.
 
-## 1.3.0 - 2026-11-16
+### Fixes
+<!-- icon: wrench -->
+- A link pasted into a chat app no longer shows the link's name in the preview.
 
-### Links show their name in chat apps
-<!-- icon: link -->
-When you paste a link into WhatsApp, Slack, Teams or another chat app, the preview now shows the
-link's name. It shows nothing else: not your message, and not the files. Looking at the preview
-never counts as a download.
+## 1.3.0 - 2026-11-16
 
 ### Check received files for viruses
 <!-- icon: shield -->
