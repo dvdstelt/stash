@@ -193,6 +193,9 @@ Some limits to know:
   only a SHA-256 of each token, in memory, for 30 days; a restart signs everyone out.
 - Every changing request from the owner's pages also needs an `X-Stash: 1` header, which another
   site can't add without the browser asking Stash first.
+- Signing in, choosing the first password, signing out and entering a link's password need that
+  header too. Otherwise a site the owner visits could post wrong passwords from their browser, and
+  the wait after 5 of them would keep the owner out.
 
 **Links.**
 - Tokens are 128 random bits.
@@ -439,7 +442,7 @@ status 200. That's 200 rather than 201, because wget2 doesn't print the reply of
 
 ## HTTP interface
 
-**Owner** (session cookie; changes also need `X-Stash: 1`):
+**Owner** (session cookie; changes also need `X-Stash: 1`, and so do setup, login and logout):
 
 | Method and path | Purpose |
 |---|---|
@@ -475,7 +478,7 @@ scanner found a virus are left out of every share link.
 |---|---|
 | `GET /d/<token>` | The upload page, or terminal instructions without `Accept: text/html` |
 | `GET /api/public/d/<token>` | Status, limits and usage, or `locked` before the password |
-| `POST /api/public/d/<token>/unlock` | `{password}`: sets the unlock cookie |
+| `POST /api/public/d/<token>/unlock` | `{password}`: sets the unlock cookie. Needs `X-Stash: 1`. |
 | `POST`, `GET`/`PUT`/`DELETE /api/public/d/<token>/uploads[/<id>]` | Chunked upload |
 | `PUT /d/<token>/<name>` | Command-line upload. Password in `Link-Password`. |
 
@@ -485,7 +488,7 @@ scanner found a virus are left out of every share link.
 |---|---|
 | `GET /s/<token>` | The share page, or download commands for a terminal |
 | `GET /api/public/s/<token>` | Status and file list, or `locked`. In a shared folder, each file has a `path`: the subfolder it's in, such as `Day 1/Morning`. |
-| `POST /api/public/s/<token>/unlock` | `{password}` |
+| `POST /api/public/s/<token>/unlock` | `{password}`. Needs `X-Stash: 1`. |
 | `GET /s/<token>/files/<id>` | One file. Add `?download` to download it instead of opening it. Counts as one download. |
 | `GET /s/<token>/all.zip` | All files as one zip, stored uncompressed, with a shared folder's subfolders. Counts as one download. |
 

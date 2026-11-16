@@ -129,7 +129,7 @@ func TestLoginAndLogout(t *testing.T) {
 	u, _ := url.Parse(e.url)
 	stolen := browser.Jar.Cookies(u)
 
-	r = e.expect(e.send(browser, http.MethodPost, "/api/logout", nil), http.StatusNoContent)
+	r = e.expect(e.send(browser, http.MethodPost, "/api/logout", nil, "X-Stash", "1"), http.StatusNoContent)
 	if c := findCookie(r, sessionCookie); c == nil || c.MaxAge >= 0 {
 		t.Errorf("logout doesn't clear the cookie: %+v", c)
 	}
@@ -382,6 +382,38 @@ func TestLoginSlowsDownGuessing(t *testing.T) {
 	}
 	r := e.expect(e.sendJSON(newTerminal(), http.MethodPost, "/api/login", map[string]string{"password": ownerPassword}), http.StatusTooManyRequests)
 	wantBody(t, r, "Too many attempts")
+}
+
+// A site the owner happens to visit can make their browser post to Stash, as plain text and
+// without the pages' X-Stash header. Those posts come from the owner's own address, so if wrong
+// passwords in them counted, any site could keep the owner waiting. They're refused unread.
+func TestOtherSitesCantSendPasswords(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	a := e.upload(rootID, "a.txt", []byte("a"))
+	l := e.createLink(nil)
+	e.changeLink(l.ID, func(l *Link) { l.PasswordHash = fastHash("open sesame") })
+	s := e.createShare(nil, a)
+	e.changeShare(s.ID, func(s *Share) { s.PasswordHash = fastHash("swordfish") })
+
+	doors := map[string]string{
+		"/api/login":                           ownerPassword,
+		"/api/public/d/" + l.Token + "/unlock": "open sesame",
+		"/api/public/s/" + s.Token + "/unlock": "swordfish",
+	}
+	for path, password := range doors {
+		for i := 0; i < 10; i++ {
+			r := e.expect(e.send(newTerminal(), http.MethodPost, path, strings.NewReader(`{"password":"a guess"}`),
+				"Content-Type", "text/plain;charset=UTF-8", "Origin", "https://other.example"), http.StatusForbidden)
+			wantBody(t, r, "Missing X-Stash header.")
+		}
+		// None of those counted: the right password, from the page, works straight away.
+		e.expect(e.sendJSON(newBrowser(), http.MethodPost, path, map[string]string{"password": password}), http.StatusNoContent)
+	}
+	for _, path := range []string{"/api/setup", "/api/logout"} {
+		e.expect(e.send(e.owner, http.MethodPost, path, strings.NewReader("{}"), "Content-Type", "text/plain;charset=UTF-8"), http.StatusForbidden)
+	}
+	e.expect(e.send(e.owner, http.MethodGet, "/api/state", nil), http.StatusOK) // still signed in
 }
 
 func TestVisitor(t *testing.T) {

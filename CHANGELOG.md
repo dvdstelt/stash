@@ -29,6 +29,8 @@ briefcase. So do the pages that people open from your links.
   empty ones.
 - Sending many wrong passwords at the same moment no longer gets around the wait after 5 wrong
   ones.
+- Another website can no longer send wrong passwords to Stash from your browser, which would make
+  you wait before you could sign in.
 
 ## 1.3.0 - 2026-11-16
 

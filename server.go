@@ -106,9 +106,9 @@ func (srv *server) routes() http.Handler {
 
 	// Signing in
 	mux.HandleFunc("GET /api/session", srv.handleSession)
-	mux.HandleFunc("POST /api/setup", srv.handleSetup)
-	mux.HandleFunc("POST /api/login", srv.handleLogin)
-	mux.HandleFunc("POST /api/logout", srv.handleLogout)
+	mux.HandleFunc("POST /api/setup", srv.fromPages(srv.handleSetup))
+	mux.HandleFunc("POST /api/login", srv.fromPages(srv.handleLogin))
+	mux.HandleFunc("POST /api/logout", srv.fromPages(srv.handleLogout))
 
 	// Owner: files, upload links, share links
 	mux.HandleFunc("GET /api/state", srv.owner(srv.handleState))
@@ -132,7 +132,7 @@ func (srv *server) routes() http.Handler {
 
 	// Anyone with an upload link
 	mux.HandleFunc("GET /api/public/d/{token}", srv.handlePublicLink)
-	mux.HandleFunc("POST /api/public/d/{token}/unlock", srv.handleLinkUnlock)
+	mux.HandleFunc("POST /api/public/d/{token}/unlock", srv.fromPages(srv.handleLinkUnlock))
 	mux.HandleFunc("POST /api/public/d/{token}/uploads", srv.handlePublicUploadStart)
 	mux.HandleFunc("GET /api/public/d/{token}/uploads/{id}", srv.publicUpload(srv.handleUploadStatus))
 	mux.HandleFunc("PUT /api/public/d/{token}/uploads/{id}", srv.publicUpload(srv.handleUploadChunk))
@@ -141,7 +141,7 @@ func (srv *server) routes() http.Handler {
 
 	// Anyone with a share link
 	mux.HandleFunc("GET /api/public/s/{token}", srv.handlePublicShare)
-	mux.HandleFunc("POST /api/public/s/{token}/unlock", srv.handleShareUnlock)
+	mux.HandleFunc("POST /api/public/s/{token}/unlock", srv.fromPages(srv.handleShareUnlock))
 	mux.HandleFunc("GET /s/{token}/files/{id}", srv.handleShareFile)
 	mux.HandleFunc("GET /s/{token}/all.zip", srv.handleShareZip)
 
@@ -315,12 +315,28 @@ func (srv *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // owner only lets the signed-in owner through. Changes also need the X-Stash header, which
 // other sites can't add to a request without the browser asking this server first.
 func (srv *server) owner(next http.HandlerFunc) http.HandlerFunc {
+	changes := srv.fromPages(next)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !srv.signedIn(r) {
 			jsonError(w, http.StatusUnauthorized, "Sign in first.")
 			return
 		}
-		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get("X-Stash") != "1" {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			changes(w, r)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// fromPages only lets through requests with the X-Stash header, which Stash's pages add to every
+// request. Another site can't add it without the browser asking this server first, and Stash
+// never says yes. Passwords are entered through this: without it, a site the owner happens to
+// visit could send wrong passwords from their browser, and the wait that follows would keep the
+// owner out. The command line doesn't come here: it sends a link's password with the file.
+func (srv *server) fromPages(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Stash") != "1" {
 			jsonError(w, http.StatusForbidden, "Missing X-Stash header.")
 			return
 		}

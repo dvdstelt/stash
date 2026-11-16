@@ -62,6 +62,8 @@ podman run --rm -v "$PWD":/src:z -w /src -e CGO_ENABLED=0 docker.io/library/gola
   password checks through the `limiter`.
 - **Owner endpoints** go through `srv.owner(...)`, which needs the session cookie and, for
   changes, the `X-Stash: 1` header.
+- **Endpoints that take a password from a page** go through `srv.fromPages(...)`, which needs the
+  `X-Stash: 1` header, so another site can't send guesses from a visitor's browser.
 
 ## Writing for people
 

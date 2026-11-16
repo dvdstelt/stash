@@ -154,6 +154,7 @@ func (e *testEnv) api(method, path string, in any) reply {
 	return e.sendJSON(e.owner, method, path, in, "X-Stash", "1")
 }
 
+// sendJSON sends JSON the way the pages do, which add the X-Stash header to every request.
 func (e *testEnv) sendJSON(c *http.Client, method, path string, in any, header ...string) reply {
 	e.t.Helper()
 	var body io.Reader
@@ -164,7 +165,7 @@ func (e *testEnv) sendJSON(c *http.Client, method, path string, in any, header .
 		}
 		body = bytes.NewReader(raw)
 	}
-	return e.send(c, method, path, body, append([]string{"Content-Type", "application/json"}, header...)...)
+	return e.send(c, method, path, body, append([]string{"Content-Type", "application/json", "X-Stash", "1"}, header...)...)
 }
 
 // expect stops the test when the reply doesn't have the wanted status.

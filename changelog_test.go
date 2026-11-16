@@ -236,7 +236,7 @@ func TestWhatsNewAfterAnUpdate(t *testing.T) {
 
 	// Remind me later changes nothing: What's new opens again the next time. Got it is a change,
 	// so it needs the pages' header.
-	e.expect(e.sendJSON(e.owner, http.MethodPost, "/api/releases/seen", nil), http.StatusForbidden)
+	e.expect(e.send(e.owner, http.MethodPost, "/api/releases/seen", nil), http.StatusForbidden)
 	e.wantWhatsNew("1.3.0")
 	e.expect(e.api(http.MethodPost, "/api/releases/seen", nil), http.StatusNoContent)
 	e.wantWhatsNew()
