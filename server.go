@@ -104,6 +104,7 @@ func (srv *server) routes() http.Handler {
 	mux.HandleFunc("GET /s/{token}", srv.handleSharePage)
 	mux.Handle("GET /css/", srv.static())
 	mux.Handle("GET /js/", srv.static())
+	mux.Handle("GET /img/", srv.static())
 
 	// Signing in
 	mux.HandleFunc("GET /api/session", srv.handleSession)

@@ -147,7 +147,7 @@ func TestPages(t *testing.T) {
 		t.Errorf("page CSP = %q", pageCSP)
 	}
 
-	for _, path := range []string{"/css/", "/js/", "/nope", "/js/nope.js"} {
+	for _, path := range []string{"/css/", "/js/", "/img/", "/nope", "/js/nope.js"} {
 		e.expect(e.get(path), http.StatusNotFound)
 	}
 }
@@ -156,7 +156,7 @@ func TestPages(t *testing.T) {
 func TestPagesLoadOnlyFilesThatExist(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	ref := regexp.MustCompile(`(?:src|href)="(/(?:js|css)/[^"]+)"`)
+	ref := regexp.MustCompile(`(?:src|href)="(/(?:js|css|img)/[^"]+)"`)
 	pages, _ := fs.Glob(e.srv.ui, "*.html")
 	if len(pages) < 4 {
 		t.Fatalf("found %d pages", len(pages))

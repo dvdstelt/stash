@@ -192,7 +192,7 @@ function snippetTabs(snippets, active = defaultTab) {
 
 /* ---------- Public page building blocks ---------- */
 
-const brandHeader = () => html`<header class="public-brand"><span class="brand-mark">${icon('briefcase')}</span><span><strong>Stash</strong> <span class="muted">· ${location.host}</span></span></header>`;
+const brandHeader = () => html`<header class="public-brand"><img class="brand-mark" src="/img/stash-icon.png" alt="" width="30" height="30"><span><strong>Stash</strong> <span class="muted">· ${location.host}</span></span></header>`;
 
 const stateCard = (iconName, title, text) =>
   html`<section class="card state"><span class="state-icon">${icon(iconName)}</span><h1>${title}</h1><p>${text}</p></section>`;

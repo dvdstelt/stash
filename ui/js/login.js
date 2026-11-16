@@ -1,14 +1,14 @@
 // Sign-in page. The first time, it's where you choose your password, using the setup link
 // Stash prints when it starts without one.
 
-const { html, icon, delegate } = window.StashUI;
+const { html, delegate } = window.StashUI;
 const { request } = window.StashAPI;
 
 const page = document.getElementById('page');
 const setupToken = new URLSearchParams(location.search).get('setup');
 
 function brand() {
-  return html`<header class="public-brand login-brand"><span class="brand-mark">${icon('briefcase')}</span><strong>Stash</strong></header>`;
+  return html`<header class="public-brand login-brand"><img class="brand-mark" src="/img/stash-icon.png" alt="" width="30" height="30"><strong>Stash</strong></header>`;
 }
 
 function form({ title, text, fields, button, submit }) {

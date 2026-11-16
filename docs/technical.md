@@ -544,7 +544,7 @@ Resuming doesn't count either, from the browser that started the download (see
 | `changelog.go` | Reading `CHANGELOG.md`, which is built in and gives Stash its version |
 | `disk_*.go` | Free disk space, per operating system |
 | `*_test.go` | Tests, with the shared helpers in `helpers_test.go` |
-| `ui/` | The pages: `index.html` (owner), `upload.html`, `share.html`, `login.html`, with `js/` and `css/` |
+| `ui/` | The pages: `index.html` (owner), `upload.html`, `share.html`, `login.html`, with `js/`, `css/` and `img/` (Stash's icon, made from `docs/images/stash-icon.png`) |
 
 The page scripts are classic scripts, not modules, sharing a few globals: `StashUI` (`ui.js`:
 templating, icons, formatting, shared components), `StashAPI` (`api.js`: requests and chunked

@@ -14,6 +14,13 @@ Stash reads this file, so keep to its format:
   ui/js/ui.js.
 -->
 
+## 1.3.1
+
+### Stash's own icon
+<!-- icon: sparkles -->
+The top-left corner of every page shows Stash's icon, a chest full of files, instead of the
+briefcase. So do the pages that people open from your links.
+
 ## 1.3.0 - 2026-11-16
 
 ### Links show their name in chat apps
