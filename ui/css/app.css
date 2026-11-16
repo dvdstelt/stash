@@ -253,6 +253,9 @@ legend { padding: 0; }
 .tile-body > .min0 { flex: 1; }
 .tile-name { overflow: hidden; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .tile-meta { margin-top: 1px; font-size: 12px; color: var(--muted); }
+/* On a share page the size sits beside the name rather than under it: the name gives way, and the
+   size stays on one line at the right edge. */
+.tile-body > .tile-meta { flex: none; margin: 0 6px 0 auto; padding-left: 8px; white-space: nowrap; }
 .tile .check { position: absolute; top: 9px; left: 9px; z-index: 2; width: 18px; height: 18px; margin: 0; accent-color: var(--accent); cursor: pointer; opacity: 0; transition: opacity .12s; }
 .tile:hover .check, .tile:focus-within .check, .tile .check:checked, .has-sel .check { opacity: 1; }
 .tile-flag { position: absolute; top: 8px; right: 8px; display: grid; padding: 4px; border-radius: 6px; background: var(--surface); color: var(--accent); box-shadow: var(--shadow-sm); }
