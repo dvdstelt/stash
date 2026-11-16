@@ -26,7 +26,7 @@ Everything lives in one folder (`-data`, `/data` in the container):
 
 | Path | Contents |
 |---|---|
-| `stash.json` | All metadata: files and folders, upload links, share links, the owner's password hash, a random secret for signing cookies, and the newest version whose What's new the owner closed with Got it. |
+| `stash.json` | All metadata: files and folders, what the virus scanner said about received files, upload links, share links, the owner's password hash, a random secret for signing cookies, and the newest version whose What's new the owner closed with Got it. |
 | `files/<id>` | The contents of each file, named by a random ID. Names, folders and dates are only in `stash.json`. Files in the trash stay here until they're deleted for good. |
 | `uploads/<id>.part` | Uploads in progress. Cleared when Stash starts, because an upload can't continue after a restart. |
 
@@ -45,6 +45,8 @@ Every setting is a command-line flag or an environment variable.
 | `-public-url` | `STASH_PUBLIC_URL` | none | Base URL for links you hand out, such as `https://files.example.com`. Without it, Stash uses the address the owner's browser used. |
 | `-trusted-proxies` | `STASH_TRUSTED_PROXIES` | none | Comma-separated IPs or CIDRs of reverse proxies whose `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` headers Stash may believe. |
 | `-trash-days` | `STASH_TRASH_DAYS` | `30` | Days that deleted files and folders stay in the trash before they're deleted for good. From 1 to 3650. |
+| `-clamd` | `STASH_CLAMD` | none | Where ClamAV's clamd listens, such as `clamav:3310`, or the path of its socket. Turns on [virus scanning](#virus-scanning) of files received through upload links. |
+| `-virus-action` | `STASH_VIRUS_ACTION` | `mark` | What happens to a file with a virus: `mark` keeps it, marked and only as a download; `refuse` turns it away. |
 | `-ui-dir` | `STASH_UI_DIR` | built in | Serve the pages from this folder instead of the embedded copy. For development. |
 
 Subcommands:
@@ -82,7 +84,9 @@ files.example.com {
 }
 ```
 
-**nginx** needs request buffering and the body size limit turned off for large uploads:
+**nginx** needs request buffering and the body size limit turned off for large uploads. With
+`STASH_VIRUS_ACTION=refuse`, a sender waits for the virus scan before getting an answer, so also
+raise `proxy_read_timeout` (60 seconds by default) to a few minutes:
 
 ```nginx
 server {
@@ -225,6 +229,8 @@ Some limits to know:
   received through an upload link is always a download, also in a folder that came with it.
 - Everything else, including HTML and SVG, is served as a download (`application/octet-stream`,
   `Content-Disposition: attachment`).
+- With [virus scanning](#virus-scanning), a file in which ClamAV found a virus is refused, or kept
+  as a download only and left out of every share link.
 
 **Pages.**
 - A strict `Content-Security-Policy`: scripts only from Stash itself, no inline scripts, no framing.
@@ -277,6 +283,93 @@ back with it.
   trash, or everything when they empty it. Share links forget those files, and an upload link whose
   folder is gone is removed. An upload through that link that was still running is refused when it
   ends, rather than landing in My files.
+
+## Virus scanning
+
+With `-clamd`, Stash has every file that arrives through an upload link checked by ClamAV. Stash
+doesn't scan anything itself: `clamav.go` sends the file to clamd over TCP (or its socket) with the
+`INSTREAM` command, in pieces of 64 KB, and reads the verdict. clamd runs in a container of its own
+and freshclam keeps its virus definitions up to date. That's too large for Stash's own image: the
+definitions take hundreds of MB, and clamd needs 3 to 4 GB of memory. The owner's own uploads aren't
+scanned.
+
+Each received file gets a `scan` field in `stash.json`:
+
+| `scan` | Meaning |
+|---|---|
+| `waiting` | Not scanned yet. Stash scans waiting files one at a time, oldest first, right after they arrive, and tries again every minute while clamd can't be reached. |
+| `clean` | No virus found. |
+| `virus` | A virus was found; `virus` holds its name, such as `Win.Test.EICAR_HDB-1`. |
+| `too-large` | Larger than clamd takes (its `StreamMaxLength`), so not scanned. |
+| `failed` | clamd broke off the scan three times, so Stash stopped trying, rather than holding up the files after it. |
+
+What happens to a file with a virus depends on `-virus-action`:
+
+- **`mark`** (the default) keeps the file. The scan runs after the sender got their answer, so
+  clamd being slow or away never holds up an upload. The owner sees **Virus found**; the file is
+  always sent as a download, and share links leave it out, on the page, in the zip and on the
+  command line. The log says `Virus found in "invoice.exe" from upload link "Tax papers": …`.
+- **`refuse`** scans the file when its last byte arrives, before the reply. A file with a virus is
+  deleted, its space is given back, and the sender gets `422` with `Not accepted: the virus scanner
+  found … in this file.` A clean file arrives as `clean`. If clamd can't be reached, the file is
+  kept as `waiting` rather than refused, and marked if the later scan finds a virus: by then the
+  sender is gone.
+
+### Setting it up
+
+The [installation guide](installing.md#checking-received-files-for-viruses) starts both containers on
+one network. Don't publish clamd's port 3310: anyone who can reach it can use it, without a
+password. The `docker.io/clamav/clamav` image is only built for amd64;
+`docker.io/clamav/clamav-debian` also runs on arm64. Neither runs on 32-bit ARM (`linux/arm/v7`).
+
+With Quadlet, put the network and ClamAV next to [`stash.container`](#starting-automatically-with-podman)
+in `~/.config/containers/systemd/`. `stash-net.network`:
+
+```ini
+[Network]
+NetworkName=stash-net
+```
+
+`clamav.container`:
+
+```ini
+[Container]
+Image=docker.io/clamav/clamav-debian
+ContainerName=clamav
+Network=stash-net.network
+Volume=clamav-db:/var/lib/clamav
+
+[Install]
+WantedBy=default.target
+```
+
+And in `stash.container`, add:
+
+```ini
+Network=stash-net.network
+Environment=STASH_CLAMD=clamav:3310
+```
+
+### Larger files
+
+clamd takes files up to 100 MB by default. Three of its settings decide how much it checks, and they
+have to be raised together: `StreamMaxLength` is how much Stash may send, `MaxFileSize` and
+`MaxScanSize` how much clamd actually looks at. With only `StreamMaxLength` raised, clamd skips a
+larger file and still answers that it's clean. Larger limits cost clamd more memory and time per file.
+Copy the image's settings, change those three lines, and mount the file over the original:
+
+```bash
+podman run --rm --entrypoint cat docker.io/clamav/clamav-debian /etc/clamav/clamd.conf > clamd.conf
+```
+
+```
+StreamMaxLength 1G
+MaxFileSize 1G
+MaxScanSize 1G
+```
+
+Then add `-v "$PWD/clamd.conf":/etc/clamav/clamd.conf:Z,ro` to ClamAV's `podman run` command, or
+`Volume=%h/clamd.conf:/etc/clamav/clamd.conf:Z,ro` to `clamav.container`.
 
 ## How uploads work
 
@@ -343,7 +436,7 @@ status 200. That's 200 rather than 201, because wget2 doesn't print the reply of
 | `GET /api/session` | `{signedIn, setupRequired}` |
 | `POST /api/setup` | `{token, password}`: set the first password |
 | `POST /api/login`, `POST /api/logout` | Sign in and out |
-| `GET /api/state` | Everything: items, links, shares, storage, public origin, the version, and whether What's new has something the owner hasn't seen (`whatsNew`) |
+| `GET /api/state` | Everything: items, links, shares, storage, public origin, the version, whether What's new has something the owner hasn't seen (`whatsNew`), and `scanner`: `mark` or `refuse` when files are checked for viruses |
 | `POST /api/folders` | `{parent, name}` |
 | `PATCH /api/items/<id>` | `{name}`: rename a file or folder. A name already taken in that folder is refused. Renaming an upload link's folder renames the link too. |
 | `POST /api/items/trash` | `{ids}`: move files and folders to the trash |
@@ -363,7 +456,8 @@ and `maxFiles`, and either `files` (IDs) or `folder` (one folder ID), only when 
 
 A share link with `files` offers exactly those files. One with `folder` offers what's in that folder
 at the moment someone looks, subfolders included, so files the owner adds later are shared too. "My
-files" itself can't be shared, because it holds every upload link's folder.
+files" itself can't be shared, because it holds every upload link's folder. Files in which the virus
+scanner found a virus are left out of every share link.
 
 **Upload links** (`<token>` from the link):
 
@@ -399,6 +493,8 @@ Resuming doesn't count either, from the browser that started the download (see
 - Resuming a share download from the command line (`curl -C -` without a cookie jar) counts as a
   new download, and so does resuming after Stash restarts.
 - Files and folders can't be moved to another folder yet.
+- Received files are scanned for viruses once, when they arrive. A virus ClamAV learns about later
+  isn't found in files it already called clean.
 - The command line uploads single files, into the link's folder. A folder has to be zipped first.
 - The tests cover the server, not the page scripts. See [Checking changes](#checking-changes).
 
@@ -413,6 +509,7 @@ Resuming doesn't count either, from the browser that started the download (see
 | `store.go` | Data model and `stash.json` |
 | `auth.go` | Password hashing, sessions, unlock cookies, guessing limits, visitor address |
 | `uploads.go` | Space reservations, chunked and command-line uploads |
+| `clamav.go` | Virus scanning with clamd |
 | `api_owner.go`, `api_public.go` | The owner's interface, and the link and share pages |
 | `changelog.go` | Reading `CHANGELOG.md`, which is built in and gives Stash its version |
 | `disk_*.go` | Free disk space, per operating system |
@@ -493,7 +590,25 @@ The tests don't cover the page scripts. After changing those, check by hand:
 9. Open What's new with the version number at the bottom of the menu. To see it open by itself,
    stop Stash, remove `seenVersion` from `stash.json` and start it again. Check that **Remind me
    later** brings it back on the next reload, and that **Got it** doesn't.
-10. Look at the browser console for errors.
+10. With a clamd running (see below) and `-clamd 127.0.0.1:3310`, upload a file containing the test
+    phrase through a link. Check that it shows **Virus found** in the grid, the list and its preview,
+    that it can't be shared, and that a share of its folder leaves it out. Stop clamd, upload
+    another file, and check that its preview says it's waiting. Start clamd again, restart Stash
+    with `-virus-action refuse`, and check that the upload page and curl both say the file with the
+    test phrase wasn't accepted.
+11. Look at the browser console for errors.
+
+The tests use a fake clamd. To try a real one without downloading the virus definitions, start the
+image without them and give it one signature of your own, for files containing
+`pretend this is a virus`:
+
+```bash
+mkdir -p clamdb
+echo 'Stash.Test.Virus:0:*:70726574656e6420746869732069732061207669727573' > clamdb/stash-test.ndb
+podman run -d --rm --name clamd-test -p 127.0.0.1:3310:3310 -e CLAMAV_NO_FRESHCLAMD=true -v "$PWD/clamdb":/var/lib/clamav:Z docker.io/clamav/clamav:stable_base
+```
+
+It's ready after about 20 seconds. ClamAV adds `.UNOFFICIAL` to the name of a signature of your own.
 
 [AGENTS.md](../AGENTS.md) lists the conventions and the security rules changes must keep.
 

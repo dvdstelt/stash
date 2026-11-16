@@ -30,6 +30,7 @@ type server struct {
 	limits     *limiter
 	setupToken string    // set while no owner password exists; guarded by st.mu
 	proxyNote  sync.Once // warns once about a reverse proxy that isn't trusted
+	scan       *scanner  // the virus scanner, or nil without -clamd
 
 	// Uploads in progress, and the space set aside for them. Guarded by st.mu.
 	uploads  map[string]*upload
@@ -75,6 +76,7 @@ func newServer(cfg config) (*server, error) {
 		pending:  map[string]int{},
 		resumes:  map[string]time.Time{},
 		releases: releases,
+		scan:     newScanner(cfg.Clamd, cfg.VirusAction),
 	}
 	if st.ownerHash == "" {
 		srv.setupToken = newID()
@@ -367,10 +369,13 @@ func (srv *server) serveFile(w http.ResponseWriter, r *http.Request, it *Item, d
 }
 
 // downloadOnly says whether a file is always sent as a download, even though its kind could
-// open in the browser. That goes for PDFs received through an upload link, also in a folder that
-// came with them: the browser's PDF viewer runs outside the sandbox the other inline files get,
-// and the sender is a stranger.
+// open in the browser. That goes for files in which the virus scanner found a virus, and for PDFs
+// received through an upload link, also in a folder that came with them: the browser's PDF viewer
+// runs outside the sandbox the other inline files get, and the sender is a stranger.
 func (srv *server) downloadOnly(it *Item) bool {
+	if it.Scan == scanVirus {
+		return true
+	}
 	if strings.ToLower(filepath.Ext(it.Name)) != ".pdf" {
 		return false
 	}

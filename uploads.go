@@ -203,7 +203,8 @@ func (srv *server) receive(w http.ResponseWriter, r *http.Request, u *upload, of
 	return u.received, item, err
 }
 
-// finishLocked moves the finished upload into place as a new file. Hold u.mu.
+// finishLocked moves the finished upload into place as a new file, and returns a copy of it.
+// Hold u.mu.
 func (srv *server) finishLocked(u *upload) (*Item, error) {
 	if err := u.file.Sync(); err != nil {
 		return nil, err
@@ -212,6 +213,32 @@ func (srv *server) finishLocked(u *upload) (*Item, error) {
 		return nil, err
 	}
 	u.done = true
+
+	// Files from strangers wait for the virus scanner. When files with a virus are refused, the
+	// scan happens now, while the sender waits for the answer; if clamd can't be reached, the
+	// file waits like any other, and is marked if it turns out to have a virus.
+	var scan scanResult
+	if srv.scan != nil && u.linkID != "" {
+		scan.state = scanWaiting
+		if srv.scan.refuse {
+			if res, err := srv.scan.check(srv.st.partPath(u.id)); err == nil {
+				scan = res
+			}
+		}
+	}
+	if scan.state == scanVirus {
+		os.Remove(srv.st.partPath(u.id))
+		srv.st.mu.Lock()
+		srv.releaseLocked(u)
+		link := ""
+		if l := srv.st.linkByID(u.linkID); l != nil {
+			link = l.Name
+		}
+		srv.st.mu.Unlock()
+		log.Printf("Refused %q on upload link %q: the virus scanner found %s in it.", u.name, link, scan.virus)
+		return nil, &httpError{http.StatusUnprocessableEntity, fmt.Sprintf("Not accepted: the virus scanner found %s in this file. "+
+			"If you think that's a mistake, tell the person who sent you this link.", scan.virus)}
+	}
 
 	srv.st.mu.Lock()
 	defer srv.st.mu.Unlock()
@@ -232,7 +259,8 @@ func (srv *server) finishLocked(u *upload) (*Item, error) {
 		parent = srv.st.subfolder(parent.ID, name)
 	}
 	now := nowMillis()
-	it := &Item{ID: newID(), Type: "file", Parent: parent.ID, Name: srv.st.uniqueName(parent.ID, u.name), Size: u.received, Modified: now}
+	it := &Item{ID: newID(), Type: "file", Parent: parent.ID, Name: srv.st.uniqueName(parent.ID, u.name), Size: u.received, Modified: now,
+		Scan: scan.state, Virus: scan.virus}
 	if err := os.Rename(srv.st.partPath(u.id), srv.st.blobPath(it.ID)); err != nil {
 		os.Remove(srv.st.partPath(u.id))
 		return nil, err
@@ -242,7 +270,12 @@ func (srv *server) finishLocked(u *upload) (*Item, error) {
 	if err := srv.st.save(); err != nil {
 		log.Printf("saving metadata: %v", err)
 	}
-	return it, nil
+	if it.Scan == scanWaiting {
+		srv.scan.poke()
+	}
+	// A copy: the scan loop may change the file while the reply is being written.
+	out := *it
+	return &out, nil
 }
 
 // touchWriter writes to the upload's file and notes the time, so the janitor can tell a live

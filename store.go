@@ -30,6 +30,11 @@ type Item struct {
 	// Trashed is when the owner deleted the item, or 0. Only the item they deleted gets it: what's
 	// inside a deleted folder is in the trash through that folder, and comes back with it.
 	Trashed int64 `json:"trashed,omitempty"`
+
+	// Scan is what the virus scanner said about a file received through an upload link (see
+	// clamav.go), or "" for files it doesn't check. Virus names what it found.
+	Scan  string `json:"scan,omitempty"`
+	Virus string `json:"virus,omitempty"`
 }
 
 // Link is an upload link: anyone with its token can add files to one folder, up to its limits.
@@ -360,13 +365,16 @@ func (st *store) linkByFolder(folder string) *Link {
 
 // underLink says whether folder is an upload link's folder, or in one: whether strangers may have
 // put what's in it there. Hold mu.
-func (st *store) underLink(folder string) bool {
+func (st *store) underLink(folder string) bool { return st.linkAbove(folder) != nil }
+
+// linkAbove finds the upload link whose folder is folder, or holds it. Hold mu.
+func (st *store) linkAbove(folder string) *Link {
 	for it := st.items[folder]; it != nil; it = st.items[it.Parent] {
-		if st.linkByFolder(it.ID) != nil {
-			return true
+		if l := st.linkByFolder(it.ID); l != nil {
+			return l
 		}
 	}
-	return false
+	return nil
 }
 
 func (st *store) shareByToken(token string) *Share {
@@ -448,13 +456,14 @@ type sharedFile struct {
 }
 
 // shareContents returns the files a share link offers. Files in the trash are left out: they're
-// only the owner's to see. A shared folder offers what's in it now, subfolders included: the
+// only the owner's to see. So are files in which the virus scanner found a virus, so they can't be
+// passed on by accident. A shared folder offers what's in it now, subfolders included: the
 // files at the top first, then each subfolder in name order. Hold mu.
 func (st *store) shareContents(s *Share) []sharedFile {
 	var out []sharedFile
 	if s.Folder == "" {
 		for _, id := range s.Files {
-			if it := st.items[id]; it != nil && !st.inTrash(id) {
+			if it := st.items[id]; it != nil && !st.inTrash(id) && it.Scan != scanVirus {
 				out = append(out, sharedFile{Item: *it})
 			}
 		}
@@ -469,7 +478,7 @@ func (st *store) shareContents(s *Share) []sharedFile {
 		list := kids[folder]
 		slices.SortFunc(list, func(a, b *Item) int { return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)) })
 		for _, it := range list {
-			if it.Type == "file" {
+			if it.Type == "file" && it.Scan != scanVirus {
 				out = append(out, sharedFile{*it, path})
 			}
 		}

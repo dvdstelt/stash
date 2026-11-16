@@ -18,6 +18,7 @@ type ownerState struct {
 	TrashDays int
 	Version   string
 	WhatsNew  bool
+	Scanner   string
 }
 
 func (e *testEnv) state() ownerState {

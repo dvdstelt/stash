@@ -26,6 +26,8 @@ type config struct {
 	TrustedProxies []netip.Prefix
 	UIDir          string
 	TrashDays      int
+	Clamd          string // where ClamAV's clamd listens: host:port, or the path of its socket
+	VirusAction    string // "mark" keeps a file with a virus and marks it; "refuse" turns it away
 }
 
 func main() {
@@ -54,6 +56,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go srv.janitor(ctx)
+	if srv.scan != nil {
+		go srv.scanLoop(ctx)
+	}
 
 	httpServer := &http.Server{
 		Addr:              cfg.Listen,
@@ -85,8 +90,15 @@ func loadConfig(name string, args []string) (config, error) {
 	proxies := fs.String("trusted-proxies", env("STASH_TRUSTED_PROXIES", ""), "comma-separated IPs or CIDRs of reverse proxies whose X-Forwarded-For and X-Forwarded-Proto headers are trusted")
 	fs.StringVar(&cfg.UIDir, "ui-dir", env("STASH_UI_DIR", ""), "serve the web pages from this directory instead of the built-in copy (for development)")
 	trashDays := fs.String("trash-days", env("STASH_TRASH_DAYS", "30"), "days that deleted files and folders stay in the trash before they're deleted for good")
+	fs.StringVar(&cfg.Clamd, "clamd", env("STASH_CLAMD", ""), "check files received through upload links for viruses with ClamAV's clamd at this address (host:port, or the path of its socket)")
+	fs.StringVar(&cfg.VirusAction, "virus-action", env("STASH_VIRUS_ACTION", "mark"), "what to do with a file in which clamd finds a virus: mark (keep it, marked, as a download only) or refuse (turn it away)")
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
+	}
+	cfg.Clamd = strings.TrimSpace(cfg.Clamd)
+	cfg.VirusAction = strings.ToLower(strings.TrimSpace(cfg.VirusAction))
+	if cfg.VirusAction != "mark" && cfg.VirusAction != "refuse" {
+		return cfg, fmt.Errorf("virus action %q: use mark or refuse", cfg.VirusAction)
 	}
 	days, err := strconv.Atoi(strings.TrimSpace(*trashDays))
 	if err != nil || days < 1 || days > 3650 {

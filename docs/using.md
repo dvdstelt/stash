@@ -56,6 +56,17 @@ Files arrive in **My files › Requests**, in a folder named after the link. Ren
 renames the link too, and deleting it revokes the link. You can change a link's limits, revoke it or
 reopen it at any time.
 
+### Viruses
+
+If your Stash [checks received files for viruses](installing.md#checking-received-files-for-viruses),
+the preview of each file that came through a link says what the virus scanner found. A file with a
+virus shows **Virus found** in red, with the name of the virus. You can still download it, if you're
+sure it's a false alarm, but it never opens in the browser, and share links leave it out, so you
+can't pass it on by accident.
+
+Stash can also be set up to refuse such files. Then the person sending one is told it wasn't
+accepted, and it never arrives.
+
 ## Sending someone files: share links
 
 1. Tick the files you want to send and click **Create share link**. Or go to **Share links** and

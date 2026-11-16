@@ -298,6 +298,7 @@ function tile(it, selectable = true) {
   return html`<div class="tile${sel ? ' selected' : ''}" role="button" tabindex="0" data-action="open" data-id="${it.id}" aria-label="${isFile ? 'Preview' : 'Open'} ${it.name}">
     ${isFile && selectable ? html`<input type="checkbox" class="check" data-action="select" data-id="${it.id}" ${sel ? raw('checked') : ''} aria-label="Select ${it.name}">` : ''}
     ${store.requestForFolder(it.id) ? html`<span class="tile-flag" title="Upload link folder">${icon('inbox', 'xs')}</span>` : ''}
+    ${it.scan === 'virus' ? html`<span class="tile-flag virus" title="Virus found: ${it.virus}">${icon('alert', 'xs')}</span>` : ''}
     <div class="thumb">${thumb(it)}</div>
     <div class="tile-body"><div class="min0"><div class="tile-name" title="${it.name}">${it.name}</div><div class="tile-meta">${itemMeta(it)}</div></div>${moreButton(it)}</div>
   </div>`;
@@ -306,6 +307,7 @@ function tile(it, selectable = true) {
 const moreButton = (it) => html`<button type="button" class="icon-btn btn-ghost more" data-action="item-menu" data-id="${it.id}" aria-haspopup="menu" aria-expanded="false" aria-label="Actions for ${it.name}" title="More actions">${icon('more')}</button>`;
 
 function itemMeta(it) {
+  if (it.scan === 'virus') return html`<span class="virus-text">Virus found</span> · ${bytes(it.size)}`;
   if (it.type === 'file') return `${bytes(it.size)} · ${rel(it.modified)}`;
   return `${plural(store.children(it.id).length, 'item')} · ${bytes(store.size(it.id))}`;
 }
@@ -317,7 +319,7 @@ function listView(items, { selectable = true, showPath = false } = {}) {
       const sel = state.selected.has(it.id);
       return html`<div class="row link${sel ? ' selected' : ''}" role="button" tabindex="0" data-action="open" data-id="${it.id}">
         ${selectable ? html`<span>${it.type === 'file' ? html`<input type="checkbox" data-action="select" data-id="${it.id}" ${sel ? raw('checked') : ''} aria-label="Select ${it.name}">` : ''}</span>` : ''}
-        <span class="name-cell"><span class="mini">${thumb(it)}</span><span class="min0 stack"><span class="ellipsis strong">${it.name}</span>${showPath ? html`<span class="ellipsis muted small">${pathText(it.parent)}</span>` : ''}</span></span>
+        <span class="name-cell"><span class="mini">${thumb(it)}</span><span class="min0 stack"><span class="ellipsis strong">${it.name}</span>${it.scan === 'virus' ? html`<span class="ellipsis small virus-text">Virus found: ${it.virus}</span>` : ''}${showPath ? html`<span class="ellipsis muted small">${pathText(it.parent)}</span>` : ''}</span></span>
         <span class="muted nowrap">${it.type === 'file' ? bytes(it.size) : bytes(store.size(it.id))}</span>
         <span class="muted nowrap col-date">${rel(it.modified)}</span>
         <span>${moreButton(it)}</span>
@@ -410,11 +412,27 @@ function searchView() {
     ${results.length ? listView(results, { showPath: true }) : html`<div class="card empty">${icon('search')}<p>No files or folders match.</p></div>`}`;
 }
 
+// What the virus scanner said about a file received through an upload link.
+function scanText(it) {
+  switch (it.scan) {
+    case 'clean': return 'No virus found';
+    case 'virus': return `Virus found: ${it.virus}`;
+    case 'waiting': return store.scanner() ? 'Waiting for the virus scanner' : 'Not checked: virus scanning is off';
+    case 'too-large': return 'Not checked: too large for the virus scanner';
+    case 'failed': return 'Not checked: the virus scanner couldn’t read it';
+    default: return '';
+  }
+}
+
+const virusStage = (it) => html`<div class="pv-none pv-virus"><span class="kind">${icon('alert')}</span>
+  <p><strong>The virus scanner found ${it.virus} in this file.</strong><br>Only download it if you’re sure it’s safe. Share links leave it out.</p></div>`;
+
 function openPreview(id) {
   const it = store.item(id);
   const req = store.requestForFolder(it.parent);
+  const virus = it.scan === 'virus';
   showModal(html`<div class="preview">
-    <div class="pv-stage">${previewMedia(it)}</div>
+    <div class="pv-stage">${virus ? virusStage(it) : previewMedia(it)}</div>
     <aside class="pv-side">
       <div class="pv-top"><h2 class="pv-title">${it.name}</h2><button type="button" class="icon-btn btn-ghost" data-action="close-modal" aria-label="Close" autofocus>${icon('x')}</button></div>
       <dl class="facts-list">
@@ -422,16 +440,17 @@ function openPreview(id) {
         <div><dt>${req ? 'Received' : 'Modified'}</dt><dd>${date(it.modified)} · ${rel(it.modified)}</dd></div>
         <div><dt>Location</dt><dd><a href="#/files/${it.parent}" data-action="close-modal">${pathText(it.parent)}</a></dd></div>
         ${req ? html`<div><dt>Sent through</dt><dd><a href="#/upload-links/${req.id}" data-action="close-modal">${req.name}</a></dd></div>` : ''}
+        ${it.scan ? html`<div><dt>Virus scan</dt><dd class="${virus ? 'virus-text' : ''}">${scanText(it)}</dd></div>` : ''}
       </dl>
       <div class="pv-actions">
-        <a class="btn btn-primary" href="${store.contentUrl(it.id)}?download" download>${icon('download')} Download</a>
-        <button type="button" class="btn" data-action="share-files" data-ids="${it.id}">${icon('link')} Create share link</button>
+        <a class="btn ${virus ? '' : 'btn-primary'}" href="${store.contentUrl(it.id)}?download" download>${icon('download')} ${virus ? 'Download anyway' : 'Download'}</a>
+        ${virus ? '' : html`<button type="button" class="btn" data-action="share-files" data-ids="${it.id}">${icon('link')} Create share link</button>`}
         <button type="button" class="btn" data-action="rename" data-id="${it.id}" data-reopen="true">${icon('pencil')} Rename</button>
         <button type="button" class="btn btn-ghost btn-danger" data-action="delete" data-ids="${it.id}">${icon('trash')} Delete</button>
       </div>
     </aside>
   </div>`, 'preview-modal');
-  if (kindOf(it.name) === 'text' && it.text === undefined) loadText(it);
+  if (!virus && kindOf(it.name) === 'text' && it.text === undefined) loadText(it);
 }
 
 const TEXT_PREVIEW = 256 * 1024;
@@ -477,7 +496,7 @@ function itemMenu(it) {
     ${file ? html`<a role="menuitem" href="${store.contentUrl(it.id)}?download" download>${icon('download')}Download</a>` : ''}
     <button type="button" role="menuitem" data-action="rename" data-id="${it.id}" ${fixed ? raw('disabled') : ''}>${icon('pencil')}Rename…</button>
     ${file
-      ? html`<button type="button" role="menuitem" data-action="share-files" data-ids="${it.id}">${icon('link')}Create share link…</button>`
+      ? html`<button type="button" role="menuitem" data-action="share-files" data-ids="${it.id}" ${it.scan === 'virus' ? raw('disabled') : ''}>${icon('link')}Create share link…</button>`
       : html`<button type="button" role="menuitem" data-action="share-folder" data-id="${it.id}">${icon('link')}Share folder…</button>`}
     <div role="separator"></div>
     <button type="button" role="menuitem" class="danger" data-action="delete" data-ids="${it.id}" ${fixed ? raw('disabled') : ''}>${icon('trash')}Delete…</button>
@@ -953,6 +972,7 @@ function shareDetail(id) {
   if (!s) return notFound('This share link doesn’t exist.', '#/share-links', 'share links');
   const files = store.shareFiles(s);
   const trashedFiles = store.sharedInTrash(s);
+  const withVirus = store.sharedWithVirus(s);
   const status = store.shareStatus(s);
   const url = shareUrl(s);
   return html`
@@ -977,19 +997,23 @@ function shareDetail(id) {
     ${s.message ? html`<div class="card note"><div class="stat-label">Message shown to visitors</div><p>${s.message}</p></div>` : ''}
     ${status === 'active' ? html`<section class="section"><h2>Send this link</h2><div class="card">${linkPanel(url, s.name, shareSnippets(url, s), `/s/${s.token}`)}</div></section>` : ''}
     <section class="section">
-      ${s.folder ? sharedFolder(store.item(s.folder)) : html`
+      ${s.folder ? sharedFolder(store.item(s.folder), withVirus) : html`
         <h2>Files in this share</h2>
         ${trashedFiles ? html`<p class="hint section-hint">${trashedFiles === 1 ? '1 file is' : `${trashedFiles} files are`} in the <a href="#/trash">trash</a>, so visitors don’t see ${trashedFiles === 1 ? 'it' : 'them'}. Restore ${trashedFiles === 1 ? 'it' : 'them'} to share ${trashedFiles === 1 ? 'it' : 'them'} again.</p>` : ''}
+        ${withVirus ? virusHint(withVirus) : ''}
         ${files.length ? html`<div class="grid">${files.map((f) => tile(f, false))}</div>` : html`<div class="card empty">${icon('file')}<p>All files in this share were deleted.</p></div>`}`}
     </section>`;
 }
 
-function sharedFolder(folder) {
+const virusHint = (n) => html`<p class="hint section-hint">The virus scanner found a virus in ${n === 1 ? '1 file' : `${n} files`}, so visitors don’t see ${n === 1 ? 'it' : 'them'}.</p>`;
+
+function sharedFolder(folder, withVirus = 0) {
   const head = html`<h2>Shared folder</h2>`;
   if (!folder) return html`${head}<div class="card empty">${icon('folder')}<p>The shared folder was deleted, so visitors see nothing.</p></div>`;
   if (store.inTrash(folder.id)) return html`${head}<div class="card empty">${icon('trash')}<p>${folder.name} is in the <a href="#/trash">trash</a>, so visitors see nothing. Restore it to share it again.</p></div>`;
   return html`${head}
     <p class="hint section-hint">Visitors see everything in ${folder.name}, also in the folders inside it, and files you add to it later.</p>
+    ${withVirus ? virusHint(withVirus) : ''}
     <div class="grid">${tile(folder, false)}</div>`;
 }
 
@@ -1029,7 +1053,7 @@ function shareForm(ids = [], folderId = '') {
 
 function filePicker(ids) {
   const chosen = new Set(ids);
-  const all = store.files();
+  const all = store.files().filter((f) => f.scan !== 'virus'); // share links leave them out anyway
   const list = [...all.filter((f) => chosen.has(f.id)), ...all.filter((f) => !chosen.has(f.id)).sort((a, b) => a.name.localeCompare(b.name))];
   return html`<fieldset class="field picker">
     <legend>Files <span class="muted" data-pick-count>${pickLabel(chosen.size, total(all.filter((f) => chosen.has(f.id))))}</span></legend>

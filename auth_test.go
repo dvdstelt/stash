@@ -749,15 +749,29 @@ func TestLoadConfig(t *testing.T) {
 	if _, err := loadConfig("stash", []string{"-no-such-flag"}); err == nil {
 		t.Error("an unknown flag is accepted")
 	}
+	if cfg.Clamd != "" || cfg.VirusAction != "mark" {
+		t.Errorf("clamd %q, virus action %q; want no scanner, and mark", cfg.Clamd, cfg.VirusAction)
+	}
+	if cfg, err := loadConfig("stash", []string{"-clamd", " clamav:3310 ", "-virus-action", " Refuse "}); err != nil || cfg.Clamd != "clamav:3310" || cfg.VirusAction != "refuse" {
+		t.Errorf("-clamd and -virus-action give %q, %q, %v", cfg.Clamd, cfg.VirusAction, err)
+	}
+	for _, bad := range []string{"delete", "keep", ""} {
+		if _, err := loadConfig("stash", []string{"-virus-action", bad}); err == nil || !strings.Contains(err.Error(), "use mark or refuse") {
+			t.Errorf("-virus-action %q gives %v", bad, err)
+		}
+	}
 
 	t.Setenv("STASH_LISTEN", ":7000")
 	t.Setenv("STASH_TRUSTED_PROXIES", "172.16.0.0/12")
 	t.Setenv("STASH_TRASH_DAYS", "90")
+	t.Setenv("STASH_CLAMD", "/run/clamd.scan/clamd.sock")
+	t.Setenv("STASH_VIRUS_ACTION", "refuse")
 	cfg, err = loadConfig("stash", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Listen != ":7000" || len(cfg.TrustedProxies) != 1 || cfg.TrustedProxies[0].String() != "172.16.0.0/12" || cfg.TrashDays != 90 {
+	if cfg.Listen != ":7000" || len(cfg.TrustedProxies) != 1 || cfg.TrustedProxies[0].String() != "172.16.0.0/12" || cfg.TrashDays != 90 ||
+		cfg.Clamd != "/run/clamd.scan/clamd.sock" || cfg.VirusAction != "refuse" {
 		t.Errorf("settings from the environment aren't used: %+v", cfg)
 	}
 	cfg, _ = loadConfig("stash", []string{"-listen", ":7001"})
