@@ -283,8 +283,9 @@ next visit. **Got it** saves the running version as `seenVersion` in `stash.json
 every browser, and the window stays closed until a newer version runs. Then it shows every version
 after `seenVersion` as new. The version number at the bottom of the menu opens it at any time.
 
-- **Updating from before 1.3.0.** Older versions didn't save `seenVersion`, so there's no telling
-  which version the owner updated from. Only the newest version counts as new.
+- **Updating from before 1.3.0.** Older versions didn't save `seenVersion`, so the owner came from
+  1.2.0 or older. Every version after 1.2.0 counts as new, such as 1.3.0 and 1.3.1 for someone who
+  skips 1.3.0. There's no telling which version before that they had, so those don't.
 - **A new Stash** saves `seenVersion` when the owner chooses the first password: there's no update
   to catch up on.
 - **Going back to an older version** keeps the newer `seenVersion`, so going forward again doesn't

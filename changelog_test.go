@@ -230,8 +230,8 @@ func TestWhatsNewAfterAnUpdate(t *testing.T) {
 		t.Errorf("changes in 1.3.0 = %+v", c)
 	}
 
-	// The owner used an older Stash, which didn't remember which version they saw. Which one
-	// they had is unknown, so only the newest is new.
+	// The owner used 1.2.0 or older, which didn't remember which version they saw. Everything
+	// after 1.2.0 is new to them.
 	e.wantWhatsNew("1.3.0")
 
 	// Remind me later changes nothing: What's new opens again the next time. Got it is a change,
@@ -259,6 +259,17 @@ func TestWhatsNewAfterAnUpdate(t *testing.T) {
 	e.wantWhatsNew()
 }
 
+// An owner coming from 1.2.0 to a later fix still sees what the version before it brought, not
+// only the fix.
+func TestWhatsNewAfterSkippingFrom120(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.useReleases("1.3.1", "1.3.0", "1.2.0", "1.1.0")
+	e.wantWhatsNew("1.3.1", "1.3.0")
+	e.expect(e.api(http.MethodPost, "/api/releases/seen", nil), http.StatusNoContent)
+	e.wantWhatsNew()
+}
+
 // Someone who just installed Stash has no update to catch up on.
 func TestNoWhatsNewAfterInstalling(t *testing.T) {
 	t.Parallel()
@@ -275,7 +286,13 @@ func TestWhatsNewIsForTheOwner(t *testing.T) {
 	e.expect(r, http.StatusUnauthorized)
 	wantNoBody(t, r, version)
 	e.expect(e.sendJSON(newBrowser(), http.MethodPost, "/api/releases/seen", nil, "X-Stash", "1"), http.StatusUnauthorized)
-	e.wantWhatsNew(version)
+	var unseen []string // what the built-in changelog has after 1.2.0
+	for _, rel := range releases {
+		if newerVersion(rel.Version, lastWithoutSeen) {
+			unseen = append(unseen, rel.Version)
+		}
+	}
+	e.wantWhatsNew(unseen...)
 }
 
 // The pages get the changelog that's built in, which is what the running version says.

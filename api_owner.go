@@ -130,14 +130,19 @@ func (srv *server) seen() {
 	}
 }
 
+// lastWithoutSeen is the newest version that didn't save seenVersion. An owner without one updated
+// from that version or an older one, so everything after it is new to them.
+const lastWithoutSeen = "1.2.0"
+
 // isNew says whether the owner hasn't seen what a release brings: it came after the newest version
-// they saw. Before they ever closed What's new with Got it, only the newest release counts as new,
-// since there's no telling which version they updated from. Hold st.mu.
+// they saw. Before they ever closed What's new with Got it, that's everything after 1.2.0. Hold
+// st.mu.
 func (srv *server) isNew(rel release) bool {
-	if srv.st.seenVersion == "" {
-		return rel.Version == srv.releases[0].Version
+	seen := srv.st.seenVersion
+	if seen == "" {
+		seen = lastWithoutSeen
 	}
-	return newerVersion(rel.Version, srv.st.seenVersion)
+	return newerVersion(rel.Version, seen)
 }
 
 func (srv *server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
