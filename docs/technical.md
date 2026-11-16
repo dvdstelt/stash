@@ -1,7 +1,7 @@
 # Stash technical guide
 
 How Stash works, how to run it in production, and how to develop it. For installing and using
-Stash, see the [README](../README.md).
+Stash, see the [installation guide](installing.md) and the [user guide](using.md).
 
 ## Overview
 
@@ -107,7 +107,8 @@ Tailscale.
 
 ### Starting automatically with Podman
 
-The README shows a minimal Quadlet file. With your own data folder and settings:
+The [installation guide](installing.md#starting-stash-automatically) shows a minimal Quadlet file.
+With your own data folder and settings:
 
 ```ini
 [Container]
@@ -163,9 +164,10 @@ findtime = 1h
 bantime = 1d
 ```
 
-`CONTAINER_NAME` is the container's name: `stash` in the README's commands and in the Quadlet file
-above. Check that the lines are there with `journalctl --user CONTAINER_NAME=stash` (leave out
-`--user` for a container that runs as root), then load the jail with `sudo fail2ban-client reload`.
+`CONTAINER_NAME` is the container's name: `stash` in the installation guide's commands and in the
+Quadlet file above. Check that the lines are there with `journalctl --user CONTAINER_NAME=stash`
+(leave out `--user` for a container that runs as root), then load the jail with
+`sudo fail2ban-client reload`.
 
 Some limits to know:
 
@@ -422,7 +424,7 @@ are ignored by git.
 podman build -t stash .
 ```
 
-Then use `localhost/stash` wherever the README says `docker.io/dvdstelt/stash`. The build stage
+Then use `localhost/stash` wherever the guides say `docker.io/dvdstelt/stash`. The build stage
 runs on your own platform and cross-compiles, so `--platform linux/arm64` (or `linux/arm/v7`)
 builds an image for another machine just as fast, without emulation.
 
