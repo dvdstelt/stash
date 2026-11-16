@@ -136,8 +136,9 @@ see the [installation guide](docs/installing.md).
   [look through the open ones](https://github.com/dvdstelt/stash/issues) first.
 - **Security problems:** please don't describe them in a public issue. Open an issue that only says
   you found one, and we'll find a private way to share the details.
-- **New versions:** see the [releases](https://github.com/dvdstelt/stash/releases). Every release
-  is on [Docker Hub](https://hub.docker.com/r/dvdstelt/stash) as `docker.io/dvdstelt/stash`.
+- **New versions:** see the [changelog](CHANGELOG.md) for what each version brings, and the
+  [releases](https://github.com/dvdstelt/stash/releases). Every release is on
+  [Docker Hub](https://hub.docker.com/r/dvdstelt/stash) as `docker.io/dvdstelt/stash`.
 - **Contributing:** contributions are welcome. The [technical guide](docs/technical.md#development)
   explains how to build, run and test Stash, and [AGENTS.md](AGENTS.md) lists the conventions and
   the security rules that changes must keep.

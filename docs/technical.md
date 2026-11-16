@@ -47,8 +47,11 @@ Every setting is a command-line flag or an environment variable.
 | `-trash-days` | `STASH_TRASH_DAYS` | `30` | Days that deleted files and folders stay in the trash before they're deleted for good. From 1 to 3650. |
 | `-ui-dir` | `STASH_UI_DIR` | built in | Serve the pages from this folder instead of the embedded copy. For development. |
 
-Subcommand: `stash reset-password [-data DIR]` removes the owner password. Run it while Stash is
-stopped; the next start prints a new setup link.
+Subcommands:
+
+- `stash reset-password [-data DIR]` removes the owner password. Run it while Stash is stopped; the
+  next start prints a new setup link.
+- `stash version` prints the version. In the container: `podman exec stash /stash version`.
 
 ## Running in production
 
@@ -388,12 +391,13 @@ Resuming doesn't count either, from the browser that started the download (see
 
 | Path | Contents |
 |---|---|
-| `main.go` | Settings, startup, `reset-password` |
+| `main.go` | Settings, startup, `reset-password` and `version` |
 | `server.go` | Routes, pages, sign-in, serving file contents, housekeeping |
 | `store.go` | Data model and `stash.json` |
 | `auth.go` | Password hashing, sessions, unlock cookies, guessing limits, visitor address |
 | `uploads.go` | Space reservations, chunked and command-line uploads |
 | `api_owner.go`, `api_public.go` | The owner's interface, and the link and share pages |
+| `changelog.go` | Reading `CHANGELOG.md`, which is built in and gives Stash its version |
 | `disk_*.go` | Free disk space, per operating system |
 | `*_test.go` | Tests, with the shared helpers in `helpers_test.go` |
 | `ui/` | The pages: `index.html` (owner), `upload.html`, `share.html`, `login.html`, with `js/` and `css/` |
@@ -475,15 +479,24 @@ The tests don't cover the page scripts. After changing those, check by hand:
 
 ### Releasing
 
-Pushing a version tag publishes the image to Docker Hub:
+Stash has no version setting: it reads `CHANGELOG.md`, which is built in, and is the newest version
+listed there. So a change that people notice also gets a line in `CHANGELOG.md`, under the version
+it will be released in. The first such change after a release adds the next version's heading. The
+format is explained at the top of the file, and the tests check it.
+
+To release, add the date to the newest version's heading (`## 1.3.0 - 2026-11-20`), commit, and
+push a tag for that version. That publishes the image to Docker Hub:
 
 ```bash
-git tag -a v1.2.0 -m "Stash 1.2.0"
-git push origin v1.2.0
+git tag -a v1.3.0 -m "Stash 1.3.0"
+git push origin v1.3.0
 ```
 
+The workflow refuses a tag that doesn't match the newest version in `CHANGELOG.md`. A prerelease
+such as `v1.3.0-rc.1` matches `1.3.0`.
+
 The workflow in `.github/workflows/publish-image.yml` builds all three platforms and pushes
-`docker.io/dvdstelt/stash` with the tags `1.2.0`, `1.2`, `1` and `latest`. A `0.x` version gets no
+`docker.io/dvdstelt/stash` with the tags `1.3.0`, `1.3`, `1` and `latest`. A `0.x` version gets no
 major-only tag, and a prerelease such as `v1.3.0-rc.1` gets only its own tag, never `latest`. People
 who want to stay on one major version can run `docker.io/dvdstelt/stash:1`.
 

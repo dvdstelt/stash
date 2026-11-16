@@ -5,7 +5,7 @@ FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27-alpine AS build
 ARG TARGETOS TARGETARCH TARGETVARIANT
 WORKDIR /src
 COPY go.mod ./
-COPY *.go ./
+COPY *.go CHANGELOG.md ./
 COPY ui ./ui
 RUN if [ "$TARGETARCH" = arm ]; then export GOARM=${TARGETVARIANT#v}; fi; \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \

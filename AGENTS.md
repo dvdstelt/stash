@@ -74,6 +74,9 @@ Stash is meant for people who aren't developers, and for the strangers they send
   messages.
 - When behavior changes, update the user guides (`docs/using.md`, `docs/installing.md`, and the
   README's feature list) and `docs/technical.md` for developers in the same change.
+- A change people notice also gets a line in `CHANGELOG.md`, under the newest version, in the same
+  plain words. Stash shows these to the owner, and takes its version from the newest heading, so
+  don't add a version or a date there unless you're asked to.
 
 ## Commits
 

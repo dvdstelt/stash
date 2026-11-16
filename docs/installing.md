@@ -94,6 +94,9 @@ where they are.
 If Stash starts automatically with Podman (see below), run `podman pull docker.io/dvdstelt/stash`
 and then `systemctl --user restart stash` instead.
 
+What each version brings is in the [changelog](../CHANGELOG.md). To see which version is running,
+look at the first lines of Stash's log, or run `podman exec stash /stash version`.
+
 ## Starting Stash automatically
 
 **Docker:** add `--restart unless-stopped` to your `docker run` command.

@@ -23,6 +23,21 @@ jobs:
         with:
           persist-credentials: false
 
+      # Stash takes its version from the newest entry in CHANGELOG.md, so the tag has to match it.
+      # A prerelease such as v1.3.0-rc.1 matches 1.3.0.
+      - name: Check the tag against CHANGELOG.md
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          newest=$(sed -n 's/^## \([0-9][0-9.]*\).*/\1/p' CHANGELOG.md | head -n 1)
+          tagged=${TAG#v}
+          tagged=${tagged%%-*}
+          if [ "$tagged" != "$newest" ]; then
+            echo "The tag $TAG doesn't match the newest version in CHANGELOG.md, $newest."
+            echo "Add the version to CHANGELOG.md, or tag the version that's there."
+            exit 1
+          fi
+
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
