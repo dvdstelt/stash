@@ -259,6 +259,12 @@ function selectableFiles() {
   return store.children(id).filter((it) => it.type === 'file');
 }
 
+function toggleSelected(id, on) {
+  if (on) state.selected.add(id);
+  else state.selected.delete(id);
+  render();
+}
+
 function selectAll(on = true) {
   for (const f of selectableFiles()) {
     if (on) state.selected.add(f.id);
@@ -976,17 +982,21 @@ const actions = {
     if (menu?.trigger === el) closeMenu();
     else openMenu(el.dataset.id, el);
   },
-  open: (el) => {
+  open: (el, e) => {
     const it = store.item(el.dataset.id);
     if (!it) return;
+    // Ctrl+click, or Cmd+click on a Mac, ticks or unticks a file, as in a file manager. (Ctrl+click
+    // on a Mac is a right-click, which opens the menu.) Folders have no checkbox, so it leaves them
+    // alone rather than opening one, which would drop the files ticked so far.
+    if (e.ctrlKey || e.metaKey) {
+      const box = el.querySelector('[data-action="select"]');
+      if (box) toggleSelected(it.id, !box.checked);
+      if (box || it.type === 'folder') return;
+    }
     if (it.type === 'folder') navigate(`#/files/${it.id}`);
     else openPreview(it.id);
   },
-  select: (el) => {
-    if (el.checked) state.selected.add(el.dataset.id);
-    else state.selected.delete(el.dataset.id);
-    render();
-  },
+  select: (el) => toggleSelected(el.dataset.id, el.checked),
   // The header checkbox ticks or unticks everything; the button in the selection bar only ticks.
   'select-all': (el) => selectAll(el.type === 'checkbox' ? el.checked : true),
   'clear-selection': () => { state.selected.clear(); render(); },
