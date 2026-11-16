@@ -13,7 +13,8 @@ Stash is a single Go program that uses only the standard library. It serves:
 - **Share link pages** (`/s/<token>`), where anyone with the link can view and download a chosen set
   of files, or everything in one folder.
 - **A plain HTTP interface** for the command line: `PUT /d/<token>/<name>` uploads a file, and
-  `GET` on a link without `Accept: text/html` prints instructions for a terminal.
+  `GET` on a link prints instructions for a terminal, unless a browser or a chat app asks for it
+  (see [Link previews](#link-previews)).
 
 The web pages are plain HTML, CSS and JavaScript without a build step. They are embedded in the
 binary with `go:embed`, so the program is the whole application. The container image is the binary
@@ -200,7 +201,8 @@ Some limits to know:
 - A visitor who enters the right password gets a cookie containing an HMAC of the link and its
   password hash. Changing the password locks everyone out again.
 - The command line sends the password in a `Link-Password` header on every request.
-- Until the password is entered, a link reveals only its name and whether it expired.
+- Until the password is entered, a link reveals only its name and whether it expired. The
+  [preview](#link-previews) a chat app shows reveals no more, also for a link without a password.
 - A share's download limit counts every request for a file's contents, and every zip. Resuming is
   free only for the browser that was counted: it gets a random ID in a `stash_downloader` cookie,
   and for 24 hours its `Range` requests for that file are free, also after the limit is reached.
@@ -245,6 +247,33 @@ Some limits to know:
   they need.
 - Files in the trash still take up disk space. They don't count against an upload link's limit, so
   deleting received files makes room on the link again.
+
+## Link previews
+
+WhatsApp, Slack, Teams and other chat apps fetch a pasted link to show a preview. They don't run the
+page's scripts, so the link pages fill in a few tags on the server: `<title>`, `description`,
+`og:title` and `og:description`, through `html/template`, which escapes them. What they say is what
+the page shows before the password:
+
+| Link | Title | Description, in short |
+|---|---|---|
+| Upload link that works | The link's name | Open the link to send your files. |
+| Share link that works | The link's name | Open the link to see and download the files. |
+| Expired | This upload link has expired / This share has expired | Ask for a new link. |
+| Share at its download limit | Download limit reached | Ask to share the files again. |
+| Revoked or unknown | This link doesn't work | Ask for a new link. |
+
+The message, the files, their sizes and how much space is left are never in a preview, also for a
+link without a password: the chat app's servers keep the preview, also after the link is revoked.
+There's no `og:image`: a picture of a shared file would count as a download, and would use up a link
+that may be downloaded once before the recipient gets to it. Fetching the page counts nothing, not
+as a download and not as a password attempt.
+
+Not every chat app asks for HTML, and without `Accept: text/html` a link answers with the
+instructions for a terminal. So `previewBots` in `server.go` lists the `User-Agent`s of chat apps
+that get the page anyway: WhatsApp (Signal sends that too), `facebookexternalhit` (Facebook,
+Messenger, Instagram, iMessage), Slack, Teams and Outlook, Discord, Telegram, X, LinkedIn and
+Mattermost. Anyone can send those names, but that only gets them the page every browser gets.
 
 ## What's new
 
@@ -463,7 +492,7 @@ scanner found a virus are left out of every share link.
 
 | Method and path | Purpose |
 |---|---|
-| `GET /d/<token>` | The upload page, or terminal instructions without `Accept: text/html` |
+| `GET /d/<token>` | The upload page with its [preview](#link-previews), or terminal instructions for clients that don't ask for HTML |
 | `GET /api/public/d/<token>` | Status, limits and usage, or `locked` before the password |
 | `POST /api/public/d/<token>/unlock` | `{password}`: sets the unlock cookie |
 | `POST`, `GET`/`PUT`/`DELETE /api/public/d/<token>/uploads[/<id>]` | Chunked upload |
@@ -473,7 +502,7 @@ scanner found a virus are left out of every share link.
 
 | Method and path | Purpose |
 |---|---|
-| `GET /s/<token>` | The share page, or download commands for a terminal |
+| `GET /s/<token>` | The share page with its [preview](#link-previews), or download commands for a terminal |
 | `GET /api/public/s/<token>` | Status and file list, or `locked`. In a shared folder, each file has a `path`: the subfolder it's in, such as `Day 1/Morning`. |
 | `POST /api/public/s/<token>/unlock` | `{password}` |
 | `GET /s/<token>/files/<id>` | One file. Add `?download` to download it instead of opening it. Counts as one download. |

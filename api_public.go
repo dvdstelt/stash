@@ -20,7 +20,7 @@ import (
 // so they reveal nothing about it.
 func (srv *server) handleUploadPage(w http.ResponseWriter, r *http.Request) {
 	if wantsHTML(r) {
-		srv.servePage(w, "upload.html")
+		srv.servePage(w, "upload.html", srv.uploadPreview(r.PathValue("token")))
 		return
 	}
 	url := srv.origin(r) + "/d/" + r.PathValue("token") + "/"
@@ -32,6 +32,24 @@ func (srv *server) handleUploadPage(w http.ResponseWriter, r *http.Request) {
 
 The file keeps its name. If the link has a password, add -H "Link-Password: YOUR-PASSWORD".
 `, url))
+}
+
+// goneLinkPreview is the preview of a link that doesn't exist, or that its owner revoked.
+var goneLinkPreview = linkPreview{"This link doesn’t work", "Ask the person who sent it for a new link."}
+
+// uploadPreview is what a chat app shows for an upload link: its name, or that it can't be used.
+// That's what the page shows before the password, so it holds for every link.
+func (srv *server) uploadPreview(token string) *linkPreview {
+	srv.st.mu.Lock()
+	defer srv.st.mu.Unlock()
+	l := srv.st.linkByToken(token)
+	switch {
+	case l == nil || l.Revoked:
+		return &goneLinkPreview
+	case l.Expires != 0 && l.Expires <= nowMillis():
+		return &linkPreview{"This upload link has expired", "If you still need to send something, ask for a new link."}
+	}
+	return &linkPreview{l.Name, "Open the link to send your files."}
 }
 
 // publicLink finds the upload link in the URL. It answers itself when the link is gone,
@@ -183,9 +201,24 @@ func (srv *server) shareFiles(s *Share) []sharedFile {
 	return srv.st.shareContents(s)
 }
 
+// sharePreview is what a chat app shows for a share link: its name, or that it can't be used.
+// Like the page before the password, it never names the files or shows the message.
+func (srv *server) sharePreview(r *http.Request) *linkPreview {
+	s, status := srv.shareFor(r)
+	switch status {
+	case "active":
+		return &linkPreview{s.Name, "Open the link to see and download the files."}
+	case "expired":
+		return &linkPreview{"This share has expired", "Ask the person who sent it for a new link."}
+	case "full":
+		return &linkPreview{"Download limit reached", "These files can’t be downloaded anymore. Ask the person who sent the link to share them again."}
+	}
+	return &goneLinkPreview
+}
+
 func (srv *server) handleSharePage(w http.ResponseWriter, r *http.Request) {
 	if wantsHTML(r) {
-		srv.servePage(w, "share.html")
+		srv.servePage(w, "share.html", srv.sharePreview(r))
 		return
 	}
 	s, status := srv.shareFor(r)

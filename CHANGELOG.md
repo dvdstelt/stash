@@ -16,6 +16,12 @@ Stash reads this file, so keep to its format:
 
 ## 1.3.0
 
+### Links show their name in chat apps
+<!-- icon: link -->
+When you paste a link into WhatsApp, Slack, Teams or another chat app, the preview now shows the
+link's name. It shows nothing else: not your message, and not the files. Looking at the preview
+never counts as a download.
+
 ### Check received files for viruses
 <!-- icon: shield -->
 Stash can have every file that comes in through an upload link checked for viruses by ClamAV, a
