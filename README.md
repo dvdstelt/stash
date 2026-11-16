@@ -52,6 +52,7 @@ that's easy to back up. Stash is one small program for one owner, with one passw
 - Folders, search, renaming, and a menu on every file and folder.
 - Tick files with a click, Ctrl+click, Shift+click or Ctrl+A, and share or delete them together.
 - Deleted files and folders stay in the trash for 30 days, so a wrong click can be undone.
+- After an update, Stash shows what the new version brings.
 
 **Upload links: ask people for files**
 

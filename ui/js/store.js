@@ -14,6 +14,8 @@ let shares = [];
 let storage = { used: 0, free: 0 };
 let origin = location.origin;
 let trashDays = 30;
+let version = '';
+let whatsNew = false;
 
 const contentUrl = (id) => `/api/files/${encodeURIComponent(id)}/content`;
 const uploadUrl = (r) => `${origin}/d/${r.token}`;
@@ -41,6 +43,8 @@ function ingest(state) {
   storage = state.storage;
   origin = state.origin;
   trashDays = state.trashDays;
+  version = state.version;
+  whatsNew = state.whatsNew;
 }
 
 const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
@@ -152,6 +156,18 @@ const store = {
 
   async emptyTrash() {
     await request('POST', '/api/trash/empty');
+    await this.load();
+  },
+
+  // What's new
+  version: () => version,
+  /** Whether What's new has something the owner hasn't seen yet, so it opens by itself. */
+  whatsNew: () => whatsNew,
+  /** What each version brings, newest first. Versions the owner hasn't seen have `new`. */
+  releases: () => request('GET', '/api/releases'),
+  /** Got it: What's new doesn't open by itself again until a newer version runs. */
+  async seenReleases() {
+    await request('POST', '/api/releases/seen');
     await this.load();
   },
 

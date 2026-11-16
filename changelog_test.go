@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"io/fs"
+	"net/http"
 	"reflect"
 	"regexp"
 	"strings"
@@ -149,5 +151,142 @@ func TestNewerVersion(t *testing.T) {
 		if got := newerVersion(tc.a, tc.b); got != tc.want {
 			t.Errorf("newerVersion(%q, %q) = %v; want %v", tc.a, tc.b, got, tc.want)
 		}
+	}
+}
+
+/* ---------- What's new ---------- */
+
+// useReleases makes Stash think it's the first of these versions, with one change in each.
+func (e *testEnv) useReleases(versions ...string) {
+	e.t.Helper()
+	var text strings.Builder
+	for _, v := range versions {
+		fmt.Fprintf(&text, "## %s\n### New in %s\nWhat %s brings.\n\n", v, v, v)
+	}
+	rs, err := parseChangelog(text.String())
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	e.srv.st.mu.Lock()
+	e.srv.releases = rs
+	e.srv.st.mu.Unlock()
+}
+
+type releasesReply struct {
+	Version  string
+	Releases []struct {
+		Version string
+		New     bool
+		Changes []change
+	}
+}
+
+func (e *testEnv) releases() releasesReply {
+	e.t.Helper()
+	var r releasesReply
+	e.expect(e.send(e.owner, http.MethodGet, "/api/releases", nil), http.StatusOK).decode(e.t, &r)
+	return r
+}
+
+// newReleases lists the versions that What's new shows as new.
+func (e *testEnv) newReleases() []string {
+	e.t.Helper()
+	out := []string{}
+	for _, r := range e.releases().Releases {
+		if r.New {
+			out = append(out, r.Version)
+		}
+	}
+	return out
+}
+
+func (e *testEnv) wantWhatsNew(want ...string) {
+	e.t.Helper()
+	st := e.state()
+	if st.WhatsNew != (len(want) > 0) {
+		e.t.Errorf("whatsNew = %v; want %v", st.WhatsNew, len(want) > 0)
+	}
+	if want == nil {
+		want = []string{}
+	}
+	if got := e.newReleases(); !reflect.DeepEqual(got, want) {
+		e.t.Errorf("new versions = %v; want %v", got, want)
+	}
+}
+
+func TestWhatsNewAfterAnUpdate(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.useReleases("1.3.0", "1.2.0", "1.1.0")
+
+	if st := e.state(); st.Version != "1.3.0" {
+		t.Errorf("version = %q; want 1.3.0", st.Version)
+	}
+	r := e.releases()
+	if r.Version != "1.3.0" || len(r.Releases) != 3 {
+		t.Fatalf("releases = %+v; want 1.3.0 and three versions", r)
+	}
+	if c := r.Releases[0].Changes; len(c) != 1 || c[0].Title != "New in 1.3.0" || c[0].Body[0].Text != "What 1.3.0 brings." {
+		t.Errorf("changes in 1.3.0 = %+v", c)
+	}
+
+	// The owner used an older Stash, which didn't remember which version they saw. Which one
+	// they had is unknown, so only the newest is new.
+	e.wantWhatsNew("1.3.0")
+
+	// Remind me later changes nothing: What's new opens again the next time. Got it is a change,
+	// so it needs the pages' header.
+	e.expect(e.sendJSON(e.owner, http.MethodPost, "/api/releases/seen", nil), http.StatusForbidden)
+	e.wantWhatsNew("1.3.0")
+	e.expect(e.api(http.MethodPost, "/api/releases/seen", nil), http.StatusNoContent)
+	e.wantWhatsNew()
+
+	// Stash still knows after a restart.
+	e = newEnvWith(t, config{DataDir: e.srv.cfg.DataDir})
+	e.useReleases("1.3.0", "1.2.0", "1.1.0")
+	e.wantWhatsNew()
+
+	// Skipping a version shows what both brought, and not again what the owner saw.
+	e.useReleases("1.5.0", "1.4.0", "1.3.0", "1.2.0", "1.1.0")
+	e.wantWhatsNew("1.5.0", "1.4.0")
+	e.expect(e.api(http.MethodPost, "/api/releases/seen", nil), http.StatusNoContent)
+
+	// Going back to an older version shows nothing, and Got it there doesn't make 1.5.0 new again.
+	e.useReleases("1.4.0", "1.3.0")
+	e.wantWhatsNew()
+	e.expect(e.api(http.MethodPost, "/api/releases/seen", nil), http.StatusNoContent)
+	e.useReleases("1.5.0", "1.4.0", "1.3.0")
+	e.wantWhatsNew()
+}
+
+// Someone who just installed Stash has no update to catch up on.
+func TestNoWhatsNewAfterInstalling(t *testing.T) {
+	t.Parallel()
+	e := startServer(t, config{})
+	e.useReleases("1.3.0", "1.2.0")
+	e.expect(e.sendJSON(e.owner, http.MethodPost, "/api/setup", map[string]string{"token": e.srv.setupToken, "password": "a good long password"}), http.StatusNoContent)
+	e.wantWhatsNew()
+}
+
+func TestWhatsNewIsForTheOwner(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	r := e.get("/api/releases")
+	e.expect(r, http.StatusUnauthorized)
+	wantNoBody(t, r, version)
+	e.expect(e.sendJSON(newBrowser(), http.MethodPost, "/api/releases/seen", nil, "X-Stash", "1"), http.StatusUnauthorized)
+	e.wantWhatsNew(version)
+}
+
+// The pages get the changelog that's built in, which is what the running version says.
+func TestWhatsNewShowsTheChangelog(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	r := e.releases()
+	if r.Version != version || len(r.Releases) != len(releases) || len(r.Releases[0].Changes) != len(releases[0].Changes) {
+		t.Errorf("releases = %+v; want the %d versions in CHANGELOG.md, newest %s", r, len(releases), version)
+	}
+	if st := e.state(); st.Version != version {
+		t.Errorf("version = %q; want %q", st.Version, version)
 	}
 }

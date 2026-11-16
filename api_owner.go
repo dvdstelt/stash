@@ -66,7 +66,12 @@ func (srv *server) handleState(w http.ResponseWriter, r *http.Request) {
 		} `json:"storage"`
 		Origin    string `json:"origin"`
 		TrashDays int    `json:"trashDays"`
-	}{Items: []*Item{}, Links: []linkView{}, Shares: []shareView{}, Origin: srv.origin(r), TrashDays: srv.cfg.TrashDays}
+		Version   string `json:"version"`
+		WhatsNew  bool   `json:"whatsNew"` // What's new has something the owner hasn't seen
+	}{
+		Items: []*Item{}, Links: []linkView{}, Shares: []shareView{}, Origin: srv.origin(r), TrashDays: srv.cfg.TrashDays,
+		Version: srv.releases[0].Version, WhatsNew: srv.isNew(srv.releases[0]),
+	}
 	for _, it := range srv.st.items {
 		state.Items = append(state.Items, it)
 	}
@@ -79,6 +84,56 @@ func (srv *server) handleState(w http.ResponseWriter, r *http.Request) {
 	state.Storage.Used = srv.st.usedBytes()
 	state.Storage.Free = srv.spaceLeft()
 	writeJSON(w, http.StatusOK, state)
+}
+
+// handleReleases returns the changelog for the What's new window, newest first, and says which
+// versions the owner hasn't seen yet.
+func (srv *server) handleReleases(w http.ResponseWriter, r *http.Request) {
+	type releaseView struct {
+		release
+		New bool `json:"new"`
+	}
+	var out struct {
+		Version  string        `json:"version"`
+		Releases []releaseView `json:"releases"`
+	}
+	srv.st.mu.Lock()
+	out.Version = srv.releases[0].Version
+	for _, rel := range srv.releases {
+		out.Releases = append(out.Releases, releaseView{rel, srv.isNew(rel)})
+	}
+	srv.st.mu.Unlock()
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleReleasesSeen is Got it in the What's new window: it doesn't open by itself again until a
+// newer version runs.
+func (srv *server) handleReleasesSeen(w http.ResponseWriter, r *http.Request) {
+	srv.st.mu.Lock()
+	defer srv.st.mu.Unlock()
+	srv.seen()
+	if srv.saveOrFail(w) {
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// seen notes that the owner knows what the running version brings. After going back to an older
+// version, it keeps the newer one, so going forward again doesn't show the same news twice. Hold
+// st.mu, and save.
+func (srv *server) seen() {
+	if v := srv.releases[0].Version; newerVersion(v, srv.st.seenVersion) {
+		srv.st.seenVersion = v
+	}
+}
+
+// isNew says whether the owner hasn't seen what a release brings: it came after the newest version
+// they saw. Before they ever closed What's new with Got it, only the newest release counts as new,
+// since there's no telling which version they updated from. Hold st.mu.
+func (srv *server) isNew(rel release) bool {
+	if srv.st.seenVersion == "" {
+		return rel.Version == srv.releases[0].Version
+	}
+	return newerVersion(rel.Version, srv.st.seenVersion)
 }
 
 func (srv *server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {

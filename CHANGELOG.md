@@ -1,6 +1,7 @@
 # Changelog
 
-What's new in each version of Stash, newest first.
+What's new in each version of Stash, newest first. After an update, Stash shows this to its owner
+in a What's new window.
 
 <!--
 Stash reads this file, so keep to its format:
@@ -15,6 +16,12 @@ Stash reads this file, so keep to its format:
 
 ## 1.3.0
 
+### See what's new after an update
+<!-- icon: sparkles -->
+After an update, Stash opens a window with what the new version brings. **Remind me later** shows
+it again next time; **Got it** puts it away until the next update. To read it again, click the
+version number at the bottom of the menu.
+
 ### Tick files with Ctrl+click and Shift+click
 <!-- icon: check -->
 Ctrl+click a file, or Cmd+click on a Mac, to tick it, as in a file manager. Shift+click another
@@ -22,10 +29,10 @@ file to tick every file in between.
 
 ### See which version is running
 <!-- icon: terminal -->
-Stash's log says which version started, and `stash version` prints it.
+The menu shows which version is running, and so do Stash's log and `stash version`.
 
 ### Fixes
-<!-- icon: check -->
+<!-- icon: wrench -->
 - **Select all** and Ctrl+A also work in My files itself, not only in the folders inside it.
 - On a share page, a file's size stays on one line next to a long name.
 
@@ -55,7 +62,7 @@ Show a link as a QR code, to open it on a phone or print it.
 Click a link to copy it. The copy icon sits inside the link box.
 
 ### Fixes
-<!-- icon: check -->
+<!-- icon: wrench -->
 - Copy buttons work when Stash is opened over plain HTTP, such as `http://192.168.1.20:8080`.
 - The upload and share pages fit on a phone, also with the commands open.
 - A long command no longer pushes the buttons of the "link ready" window off the edge.

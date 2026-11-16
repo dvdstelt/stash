@@ -78,6 +78,11 @@ function renderSidebar(section) {
     <div class="storage-head"><span>Storage</span><span class="muted">${bytes(used)} used</span></div>
     <div class="meter" title="Used, plus what open upload links could still add"><span style="width:${pct(used)}"></span><span class="reserved" style="width:${pct(promised)}"></span></div>
     <p class="hint">${bytes(store.free())} free on the disk. Open upload links can add up to ${bytes(promised)}.${trashBytes ? ` The trash holds ${bytes(trashBytes)}.` : ''}</p>`.s;
+
+  $('#version').textContent = `Version ${store.version()}`;
+  const versionBtn = $('.version');
+  versionBtn.hidden = false;
+  versionBtn.classList.toggle('has-news', store.whatsNew());
 }
 
 /** Runs a change on the server and shows the result. Returns the result, or false if it failed. */
@@ -169,6 +174,82 @@ function invalid(input, message) {
   input.setCustomValidity(message);
   input.reportValidity();
   input.addEventListener('input', () => input.setCustomValidity(''), { once: true });
+}
+
+/* ---------- What's new ---------- */
+
+const CHANGELOG_URL = 'https://github.com/dvdstelt/stash/blob/main/CHANGELOG.md';
+
+/**
+ * Changelog text, with its **bold** and `code` shown as such, and curly apostrophes as on the
+ * rest of the pages. Every part is still escaped.
+ */
+function rich(text) {
+  const curly = (s) => s.replace(/(\w)'/g, '$1’');
+  return text.split(/(\*\*[^*]+\*\*|`[^`]+`)/).map((s, i) => {
+    if (i % 2 === 0) return curly(s);
+    return s.startsWith('**') ? html`<strong>${curly(s.slice(2, -2))}</strong>` : html`<code>${s.slice(1, -1)}</code>`;
+  });
+}
+
+/** A date such as 2026-11-14, as a day where the owner is. */
+function day(s) {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function releaseNotes(r, latest) {
+  const tag = r.new ? html`<span class="badge accent">New</span>` : latest ? html`<span class="badge">Latest</span>` : '';
+  return html`<details class="wn-release" ${raw(latest || r.new ? 'open' : '')}>
+    <summary>
+      <span class="wn-version">${r.version}</span>${tag}
+      ${r.date ? html`<span class="muted small">${date(day(r.date))}</span>` : ''}
+      ${icon('chevron-down', 'chev')}
+    </summary>
+    <ul class="wn-changes">
+      ${r.changes.map((c) => html`<li class="wn-change">
+        <span class="wn-icon">${icon(c.icon || 'sparkles')}</span>
+        <div class="min0">
+          <h3>${rich(c.title)}</h3>
+          ${c.body.map((b) => (b.list ? html`<ul>${b.list.map((li) => html`<li>${rich(li)}</li>`)}</ul>` : html`<p>${rich(b.text)}</p>`))}
+        </div>
+      </li>`)}
+    </ul>
+  </details>`;
+}
+
+/**
+ * What each version brings. It opens by itself when the owner hasn't seen what's new in this
+ * version. Remind me later, or closing it any other way, leaves it to open again on the next visit;
+ * Got it stops that until a newer version runs.
+ */
+async function openWhatsNew() {
+  let notes;
+  try {
+    notes = await store.releases();
+  } catch (err) {
+    if (err.status === 401) location.href = '/login';
+    else toast(err.message, 'alert');
+    return;
+  }
+  const news = notes.releases.filter((r) => r.new).reduce((n, r) => n + r.changes.length, 0);
+  showModal(html`<div class="modal-head wn-head">
+      <span class="wn-mark">${icon('sparkles')}</span>
+      <div class="min0">
+        <h2>What’s new</h2>
+        <p class="muted">Version ${notes.version}${news ? ` · ${plural(news, 'new update')}` : ''}</p>
+      </div>
+      <button type="button" class="icon-btn btn-ghost" data-action="close-modal" aria-label="Close">${icon('x')}</button>
+    </div>
+    <div class="modal-body wn-body">
+      ${notes.releases.map((r, i) => releaseNotes(r, i === 0))}
+      <a class="wn-more" href="${CHANGELOG_URL}" target="_blank" rel="noopener">Changelog on GitHub ${icon('external', 'sm')}</a>
+    </div>
+    <div class="modal-foot">
+      ${news
+        ? html`<button type="button" class="btn" data-action="close-modal">Remind me later</button><button type="button" class="btn btn-primary" data-action="whats-new-seen" autofocus>Got it</button>`
+        : html`<button type="button" class="btn btn-primary" data-action="close-modal" autofocus>Close</button>`}
+    </div>`, 'whats-new');
 }
 
 /* ---------- Files ---------- */
@@ -1044,6 +1125,13 @@ const actions = {
   delete: (el) => confirmDelete(el.dataset.ids.split(',')),
   'delete-selected': () => confirmDelete([...state.selected]),
   'close-modal': () => modal.close(),
+  'whats-new': () => {
+    document.body.classList.remove('nav-open');
+    openWhatsNew();
+  },
+  'whats-new-seen': async () => {
+    if (await attempt(() => store.seenReleases())) modal.close();
+  },
   // A click anywhere on the link copies it, and selects it to show what was copied.
   'copy-link': (el) => {
     const input = el.closest('.link-field').querySelector('input');
@@ -1289,4 +1377,7 @@ window.addEventListener('beforeunload', (e) => {
   if (uploads.some((u) => u.status === 'uploading')) e.preventDefault();
 });
 
-store.load().then(render, failedToLoad);
+store.load().then(() => {
+  render();
+  if (store.whatsNew()) openWhatsNew();
+}, failedToLoad);
