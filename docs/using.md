@@ -43,7 +43,8 @@ what's new again, also for earlier versions. A dot next to it means there's news
 The person who opens the link sees your message, how much space is left, and an area to drag files
 or folders onto. They can't see files that are already there. If the link is full, has expired or
 was revoked, they get a clear message instead. A folder they upload arrives with the folders inside
-it, and every file in it counts towards the link's limits.
+it, and every file in it counts towards the link's limits. Without a maximum number of files, a
+link takes 10,000 files, and every link takes at most 10,000 folders.
 
 <p align="center">
   <picture>

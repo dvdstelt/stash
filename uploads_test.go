@@ -877,3 +877,64 @@ func TestFolderUploadThroughLink(t *testing.T) {
 	}
 	e.checkNothingReserved()
 }
+
+// An empty file takes no space, so the size limit alone wouldn't stop a stranger from adding
+// them forever. A full link takes nothing more.
+func TestFullLinkTakesNoEmptyFiles(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	l := e.createLink(map[string]any{"quota": 5})
+	b := newBrowser()
+	e.uploadThrough(b, l.Token, "", "empty.txt", "") // while there's room, an empty file is fine
+	e.expect(e.put(l.Token, "five.txt", strings.NewReader("12345")), http.StatusOK)
+
+	r := e.expect(e.sendJSON(b, http.MethodPost, "/api/public/d/"+l.Token+"/uploads", map[string]any{"path": "A/B", "name": "empty.txt", "size": 0}), http.StatusRequestEntityTooLarge)
+	wantBody(t, r, "This link is full.")
+	r = e.expect(e.put(l.Token, "empty.txt", bytes.NewReader(nil)), http.StatusRequestEntityTooLarge)
+	wantBody(t, r, "This upload link is full.")
+	if got := e.listing(l.Folder); strings.Contains(got, "A") || len(e.filesIn(l.Folder)) != 2 {
+		t.Errorf("a full link took more: its folder holds %q", got)
+	}
+	e.checkNothingReserved()
+}
+
+// Every file and folder is a line in stash.json, whatever its size. A link without a file limit
+// of its own still takes only so many files, and every link only so many folders.
+func TestLinkTakesOnlySoManyFilesAndFolders(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	b := newBrowser()
+	seed := func(l linkView, kind string, n int) {
+		e.srv.st.mu.Lock()
+		defer e.srv.st.mu.Unlock()
+		for i := range n {
+			it := &Item{ID: newID(), Type: kind, Parent: l.Folder, Name: fmt.Sprintf("%s %d", kind, i), Modified: nowMillis()}
+			e.srv.st.items[it.ID] = it
+		}
+	}
+	start := func(l linkView, path, name string) reply {
+		return e.sendJSON(b, http.MethodPost, "/api/public/d/"+l.Token+"/uploads", map[string]any{"path": path, "name": name, "size": 0})
+	}
+
+	files := e.createLink(nil)
+	seed(files, "file", maxLinkFiles-1)
+	e.uploadThrough(b, files.Token, "", "last.txt", "")
+	r := e.expect(start(files, "", "more.txt"), http.StatusForbidden)
+	wantBody(t, r, fmt.Sprintf("This link takes at most %d files.", maxLinkFiles))
+	if info := e.linkInfo(b, files.Token, http.StatusOK); info.Status != "full" || info.Files != maxLinkFiles {
+		t.Errorf("link = %+v; want full with %d files", info, maxLinkFiles)
+	}
+	r = e.expect(e.put(files.Token, "more.txt", strings.NewReader("x")), http.StatusRequestEntityTooLarge)
+	wantBody(t, r, "This upload link is full.")
+
+	folders := e.createLink(nil)
+	seed(folders, "folder", maxLinkFolders-1)
+	e.uploadThrough(b, folders.Token, "Last", "a.txt", "")
+	e.uploadThrough(b, folders.Token, "last", "b.txt", "") // a folder that's there already costs nothing
+	e.uploadThrough(b, folders.Token, "", "c.txt", "")
+	r = e.expect(start(folders, "Last/Deeper", "d.txt"), http.StatusForbidden)
+	wantBody(t, r, fmt.Sprintf("This link takes at most %d folders. Put the files in fewer folders.", maxLinkFolders))
+	r = e.expect(start(folders, "One more", "d.txt"), http.StatusForbidden)
+	wantBody(t, r, "folders")
+	e.checkNothingReserved()
+}

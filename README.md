@@ -58,7 +58,8 @@ that's easy to back up. Stash is one small program for one owner, with one passw
 
 - Every link has its own size limit, from 25 MB for a few photos to 500 GB for a backup, plus an
   optional maximum number of files, expiry date, password and message.
-- People can upload a whole folder, and every file in it counts towards the link's limits.
+- People can upload a whole folder, and every file in it counts towards the link's limits. A link
+  takes at most 10,000 files and 10,000 folders, so nobody fills it with empty ones.
 - Very large files go up from the command line, with ready-made commands for curl, wget and
   PowerShell on macOS, Linux and Windows.
 - A QR code opens the link on a phone, or goes on a printed sign at an event.

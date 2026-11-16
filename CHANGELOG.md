@@ -24,6 +24,9 @@ briefcase. So do the pages that people open from your links.
 ### Fixes
 <!-- icon: wrench -->
 - A link pasted into a chat app no longer shows the link's name in the preview.
+- An upload link that's full no longer takes empty files. A link also takes at most 10,000 files,
+  unless you chose a maximum yourself, and at most 10,000 folders, so nobody can fill Stash with
+  empty ones.
 
 ## 1.3.0 - 2026-11-16
 

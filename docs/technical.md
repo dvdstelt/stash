@@ -241,6 +241,10 @@ Some limits to know:
 - An upload sets its space aside before any data arrives, against the link's limit and the free disk
   space, minus a 512 MB reserve.
 - Uploads in progress count against the limit, so parallel uploads can't overshoot it.
+- A full link takes nothing more, not even an empty file. Every file and folder is an entry in
+  `stash.json` whatever its size, so a link also takes at most 10,000 files, unless the owner chose
+  a maximum, and at most 10,000 folders. Otherwise a stranger could add empty files, each with 64
+  folders, without end.
 - A connection that sends nothing for 2 minutes is closed. Uploads themselves may take as long as
   they need.
 - Files in the trash still take up disk space. They don't count against an upload link's limit, so
@@ -411,7 +415,9 @@ Strangers can't make folders, so the server makes them, inside `parent` or the l
   `name (2)`, or the first such name that's a folder or still free, so all files still land in the
   same one.
 - **Counted on the link.** An upload link's size and file limits count the files in its folder and
-  in every folder below it, leaving out what's in the trash.
+  in every folder below it, leaving out what's in the trash. The folders below it are counted too:
+  an upload that would bring the link above 10,000 folders is refused when it starts. Uploads that
+  are still running aren't counted yet, so the link can end up a little over.
 
 ### From the command line: one request
 

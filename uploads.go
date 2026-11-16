@@ -94,8 +94,13 @@ func (srv *server) startUpload(name, path, parent string, link *Link, size int64
 	tooLarge := fmt.Sprintf("Not enough space on the server: %s is free.", formatBytes(limit))
 	if link != nil {
 		used, files := srv.st.linkUsage(link)
-		if link.MaxFiles > 0 && files+srv.pending[link.ID] >= link.MaxFiles {
-			return nil, &httpError{http.StatusForbidden, fmt.Sprintf("This link takes at most %d files.", link.MaxFiles)}
+		if files+srv.pending[link.ID] >= link.fileLimit() {
+			return nil, &httpError{http.StatusForbidden, fmt.Sprintf("This link takes at most %d files.", link.fileLimit())}
+		}
+		// Uploads that are still running may add folders of their own, so this can overshoot by
+		// what those bring: at most maxUploadsPerLink times maxFolderDepth.
+		if have, missing := srv.st.linkFolders(link, folders); missing > 0 && have+missing > maxLinkFolders {
+			return nil, &httpError{http.StatusForbidden, fmt.Sprintf("This link takes at most %d folders. Put the files in fewer folders.", maxLinkFolders)}
 		}
 		if left := max(0, link.Quota-used-srv.reserved[link.ID]); left < limit {
 			limit = left
@@ -105,7 +110,9 @@ func (srv *server) startUpload(name, path, parent string, link *Link, size int64
 			}
 		}
 	}
-	if size > limit || (size < 0 && limit == 0) {
+	// A full link takes nothing more, not even an empty file: those cost no space, so nothing else
+	// would stop them.
+	if size > limit || (limit == 0 && (size < 0 || link != nil)) {
 		return nil, &httpError{http.StatusRequestEntityTooLarge, tooLarge}
 	}
 

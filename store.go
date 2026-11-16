@@ -415,6 +415,51 @@ func (st *store) linkUsage(l *Link) (used int64, files int) {
 	return used, files
 }
 
+// An upload link's size limit doesn't cap what its files and folders cost in stash.json: an empty
+// file takes no space, and can bring 64 folders along. So every link also takes only so many files,
+// if the owner didn't choose a number, and only so many folders.
+const (
+	maxLinkFiles   = 10_000
+	maxLinkFolders = 10_000
+)
+
+// fileLimit is how many files the link takes: what the owner chose, or maxLinkFiles.
+func (l *Link) fileLimit() int {
+	if l.MaxFiles > 0 {
+		return l.MaxFiles
+	}
+	return maxLinkFiles
+}
+
+// linkFolders counts the folders received through a link, and how many of the folders in path,
+// such as ["Trip", "Day 1"], a file with that path would still add. Folders in the trash don't
+// count, like the files in them. Hold mu.
+func (st *store) linkFolders(l *Link, path []string) (have, missing int) {
+	kids := st.liveKids()
+	var walk func(folder string)
+	walk = func(folder string) {
+		for _, it := range kids[folder] {
+			if it.Type == "folder" {
+				have++
+				walk(it.ID)
+			}
+		}
+	}
+	walk(l.Folder)
+	at := l.Folder
+next:
+	for i, name := range path {
+		for _, it := range kids[at] {
+			if it.Type == "folder" && strings.EqualFold(it.Name, name) {
+				at = it.ID
+				continue next
+			}
+		}
+		return have, len(path) - i
+	}
+	return have, 0
+}
+
 // liveKids lists what's in each folder, leaving out what's in the trash. One pass over all items,
 // rather than one per folder, keeps walking large trees quick.
 func (st *store) liveKids() map[string][]*Item {
@@ -441,7 +486,7 @@ func linkStatus(l *Link, used int64, files int) string {
 		return "revoked"
 	case l.Expires != 0 && l.Expires <= nowMillis():
 		return "expired"
-	case used >= l.Quota || (l.MaxFiles > 0 && files >= l.MaxFiles):
+	case used >= l.Quota || files >= l.fileLimit():
 		return "full"
 	}
 	return "active"
